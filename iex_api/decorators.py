@@ -2,6 +2,8 @@ import pandas as pd
 import logging
 import os
 from dotenv import load_dotenv
+import functools
+import numpy as np
 
 load_dotenv
 
@@ -29,6 +31,7 @@ def cross_reference_database(iex_records: int, stock: str, db_table: str) -> int
 
 
 def cast_as_dataframe(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         request = func(*args, **kwargs)
         df = pd.DataFrame()
@@ -37,6 +40,34 @@ def cast_as_dataframe(func):
             df = pd.concat([df, temp])
         return df
     return wrapper
+
+
+def write_to_db(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        """This function writes the contents of a dataframe to a sql table.
+        The table name is the same as that of the function"""
+        count = 0
+        df = func(*args, **kwargs)
+        #df['mean'] = df.mean(axis=1)
+        #for col in df.columns:
+        #    df[col].loc[(df[col] == 0)] = df['mean']
+        #    count += 1
+        #df.pop('mean')
+        df.replace(0, np.nan, inplace=True)
+        #df.apply(lambda row: row.fillna(row.mean()), axis=1)
+        #df.T.fillna(df.mean(axis=1)).T
+        m = df.mean(axis=1)
+        for i, col in enumerate(df):
+            # using i allows for duplicate columns
+            # inplace *may* not always work here, so IMO the next line is preferred
+            # df.iloc[:, i].fillna(m, inplace=True)
+            df.iloc[:, i] = df.iloc[:, i].fillna(m)
+        df.to_sql(func.__name__,
+                  os.getenv('MYSQL_CONNECTION'), if_exists='append',index=False)
+        logger.info(f'Writing dataframe of shape {df.shape} to {func.__name__}')
+    return wrapper
+
 
 
 
