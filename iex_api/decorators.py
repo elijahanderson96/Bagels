@@ -4,10 +4,10 @@ import os
 from dotenv import load_dotenv
 import functools
 import numpy as np
+from .transforms import interpolate
 
-load_dotenv
 
-logging.basicConfig(filename='db.log', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -47,24 +47,16 @@ def write_to_db(func):
     def wrapper(*args, **kwargs):
         """This function writes the contents of a dataframe to a sql table.
         The table name is the same as that of the function"""
-        count = 0
         df = func(*args, **kwargs)
-        #df['mean'] = df.mean(axis=1)
-        #for col in df.columns:
-        #    df[col].loc[(df[col] == 0)] = df['mean']
-        #    count += 1
-        #df.pop('mean')
         df.replace(0, np.nan, inplace=True)
-        #df.apply(lambda row: row.fillna(row.mean()), axis=1)
-        #df.T.fillna(df.mean(axis=1)).T
         m = df.mean(axis=1)
         for i, col in enumerate(df):
-            # using i allows for duplicate columns
-            # inplace *may* not always work here, so IMO the next line is preferred
-            # df.iloc[:, i].fillna(m, inplace=True)
             df.iloc[:, i] = df.iloc[:, i].fillna(m)
+        if kwargs['interpolate']:
+            logger.info('Interpolating...')
+            interpolate(df, date_col='reportDate',name=func.__name__)
         df.to_sql(func.__name__,
-                  os.getenv('MYSQL_CONNECTION'), if_exists='append',index=False)
+                  os.getenv('POSTGRES_CONNECTION'), if_exists='append', index=False)
         logger.info(f'Writing dataframe of shape {df.shape} to {func.__name__}')
     return wrapper
 
