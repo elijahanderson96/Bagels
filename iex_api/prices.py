@@ -22,11 +22,11 @@ class UpdatePrices:
         self.prices['symbol'] = self.stock
         self.prices['sharesOutstanding'] = self.shares_outstanding
         self.prices['marketCap'] = self.prices['Close'] * self.shares_outstanding
-        self.prices.to_sql('Stock_Prices', self.engine, if_exists='append', index=False)
+        self.prices.to_sql('stock_prices', self.engine, if_exists='append', index=False)
         self.prices = pd.concat(
-            [self.prices, (pd.read_sql('SELECT * FROM "Stock_Prices"', self.engine))]
+            [self.prices, (pd.read_sql('SELECT * FROM stock_prices', self.engine))]
         ).drop_duplicates(subset=['Date', 'symbol'])
-        self.prices.to_sql('Stock_Prices', self.engine, if_exists='replace', index=False)
+        self.prices.to_sql('stock_prices', self.engine, if_exists='replace', index=False)
         logger.info(f'Inserted historical stock price data to Stock_Prices table for {self.stock.upper()}')
         logger.info(f'{self.stock.upper()} has {self.shares_outstanding} shares outstanding.')
 
