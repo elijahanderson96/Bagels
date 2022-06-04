@@ -2,13 +2,13 @@ import os
 import requests
 from dotenv import load_dotenv
 import pandas as pd
-from .decorators import cast_as_dataframe, write_to_db
+from decorators import cast_as_dataframe, write_to_db
 import logging
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from .config import treasury_endpoints
-from .prices import UpdatePrices
-from . import TableNotFoundError
+from config import treasury_endpoints
+from prices import UpdatePrices
+
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class Pipeline(Iex_Base):
     # Fix the index of this dataframe
     @write_to_db
     @cast_as_dataframe
-    def fundamentals(self, stock, subkey='ttm', last=5, interpolate = False):
+    def fundamentals(self, stock, subkey='ttm', last=5, interpolate=False):
         assert subkey in ['ttm', 'quarterly'], 'Subkey must be ttm or quarterly'
         url = self.url + f'/FUNDAMENTALS/{stock}/{subkey}'
         logger.info(f'Pinging {url} for fundamentals data')
@@ -111,17 +111,12 @@ class Pipeline(Iex_Base):
         # Retrieve the "count" entry in the metadata
         n_records = metadata.loc[(metadata['subkey'] == 'TTM')]['count']
         logger.info(f'There were {int(n_records)} TTM records found on IEX Cloud.')
-        current_records = 0
-        try:
-            current_records = pd.read_sql(f"SELECT * FROM Fundamentals WHERE symbol='{stock}';",
+        current_records = pd.read_sql(f"SELECT * FROM Fundamentals WHERE symbol='{stock}';",
                                       self.engine)
-            current_records = len(current_records.loc[(current_records['symbol'] == stock)][
+        current_records = len(current_records.loc[(current_records['symbol'] == stock)][
                                   'symbol'])
-            logger.info(f'We currently have {current_records} records in our database')
-        except TableError:
-            logger.error('No table was found')
-
-        n_records = int(n_records) - int(current_records)  # Take the difference
+        logger.info(f'We currently have {current_records} records in our database')
+        n_records = int(n_records) - int(current_records)  
         logger.info(f'Number of records being fetched for {stock}: {n_records}')
 
         if n_records != 0:
@@ -141,5 +136,7 @@ class Pipeline(Iex_Base):
             prices = UpdatePrices(stock, shares_outstanding)
             
 
-
+if __name__ == '__main__':
+    DataGetter = Pipeline()
+    DataGetter.run(['C', 'BAC', 'JPM'])
 
