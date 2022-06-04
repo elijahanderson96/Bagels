@@ -5,14 +5,18 @@ import numpy as np
 
 
 def interpolate(df: pd.DataFrame, date_col: str = None, name='') -> pd.DataFrame:
+    #need to account for the fact that after the bulk record retrieval we will be dealing
+    #with single records only, and need to get the latest from the database.
+
     df = df.sort_values(by=['symbol', 'reportDate'])
     report_dates = df.pop('reportDate')
     symbols = df.pop('symbol')
+
     df = df._get_numeric_data()
     report_dates = pd.to_datetime(report_dates)
     final_df = pd.DataFrame()
+
     for i in range(len(report_dates)):
-        print('interpolating')
         if i + 1 < len(report_dates):
             if symbols.iloc[i + 1] != symbols.iloc[i]:
                 continue
@@ -21,6 +25,7 @@ def interpolate(df: pd.DataFrame, date_col: str = None, name='') -> pd.DataFrame
             dates = pd.date_range((report_dates.iloc[i]),
                                   (report_dates.iloc[i + 1]), freq='d').strftime(
                 "%Y-%m-%d").tolist()
+
             temp_values = {}
             for col in df.columns:
                 if col != date_col:
@@ -36,6 +41,7 @@ def interpolate(df: pd.DataFrame, date_col: str = None, name='') -> pd.DataFrame
     final_df.drop_duplicates(subset=['dates_interpolated', 'symbol']
                              ).to_sql(f'interpolated_{name}',
                                       os.getenv('POSTGRES_CONNECTION'),
-                                      if_exists='replace',
+                                      if_exists='append',
                                       index=False)
+    
     return final_df
