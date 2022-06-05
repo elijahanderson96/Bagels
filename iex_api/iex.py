@@ -138,5 +138,5 @@ class Pipeline(Iex_Base):
 
 if __name__ == '__main__':
     DataGetter = Pipeline()
-    DataGetter.run(['C', 'BAC', 'JPM'])
+    DataGetter.run(['C', 'BAC', 'JPM','MS','GS','TSLA','GOOGL','AAPL','KO','MSFT'])
 

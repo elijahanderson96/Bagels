@@ -21,7 +21,7 @@ class UpdatePrices:
         self.prices = download(self.stock, start=self.raw_financials_df['min'][0]).reset_index()
         self.prices['symbol'] = self.stock
         self.prices['sharesOutstanding'] = self.shares_outstanding
-        self.prices['marketCap'] = self.prices['Close'] * self.shares_outstanding
+        self.prices['marketCap'] = self.prices['Adj Close'] * self.shares_outstanding
         self.prices.to_sql('stock_prices', self.engine, if_exists='append', index=False)
         self.prices = pd.concat(
             [self.prices, (pd.read_sql('SELECT * FROM stock_prices', self.engine))]
