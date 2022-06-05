@@ -5,6 +5,8 @@ import os
 from sklearn.preprocessing import MinMaxScaler
 from dotenv import load_dotenv
 from datetime import datetime
+from iex_api.transforms import fetch_dataset
+from tensorboard.plugins.hparams import api as hp
 
 load_dotenv()
 
@@ -12,30 +14,29 @@ logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=loggi
 logger = logging.getLogger(__name__)
 
 
-class TotalMarketModel:
-    def __init__(self):
-        self.db_con = os.getenv('POSTGRES_CONNECTION')
-        self.data = pd.read_sql('SELECT * FROM public.interpolated_fundamentals',con=self.db_con)
-
-        # fix the database schema so we don't need to rename and we dont need to cast as type.
-        self.data.rename(columns={'dates_interpolated':'Date'}, inplace=True)
-        self.data['Date']=self.data['Date'].astype('datetime64[ns]')
-        self.data['Date'] = self.data['Date'] + pd.Timedelta(days=91)
-
-        self.labels = pd.read_sql('SELECT "marketCap","Date",symbol FROM stock_prices ',con=self.db_con)
-        self.labels['Date'] = self.labels['Date'].astype('datetime64[ns]')
-        logger.info(f'Obtained dataset of shape {self.data.shape}')
-        logger.info(f'Obtained labels of shape {self.labels.shape}')
-
-        self.dataset = pd.merge(self.data, self.labels, on=['Date','symbol'])
-        self.prediction_dataset  = self.data[self.data['Date'] > datetime.now()]
-        logger.info(f'Dataset is of shape {self.dataset.shape}')
-        logger.info(f'Pred_df is of shape {self.prediction_dataset.shape}')
-
-        self.close = self.dataset.pop('marketCap')
-        self.Date = self.dataset['Date']
-
+class Model:
+    def __init__(self, model_type='total', batch_size=8, epochs=50, learning_rate=0.00001):
         self.model = None
+        self.model_type= model_type
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self.optimizer  = tf.keras.optimizers.Adam(learning_rate=0.00001)
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss',verbose=5,mode='min',patience=4)
+
+        self.dataset = fetch_dataset(self.model_type)
+
+        self.num_units = hp.Hparam('num_units', hp.Discrete([32,64,128,256]))
+        self.drop_out  = hp.Hparam('dropout',hp.RealInterval(.1, .2, .3))
+        self.metric = hp.Metric('loss',display_name='Loss')
+
+        with tf.summary.create_file_writer('logs/hparam_tuning').as_default():
+            hp.params_config(
+                hparams=[self.num_units,self.drop_out],
+                metrics=[self.metric]
+            )
+
+    def train_test_model()
                                        
                                 
     def one_hot_encode(self):
@@ -53,37 +54,37 @@ class TotalMarketModel:
         self.prediction_dataset.fillna(0)
         self.dataset = self.dataset._get_numeric_data()
         self.prediction_dataset = self.prediction_dataset._get_numeric_data()
-        print(self.dataset.shape)
         self.columns = self.dataset.columns.to_list()
         self.scaler = MinMaxScaler()
         self.normalized_dataset = self.scaler.fit_transform(self.dataset)
         self.normalized_prediction_dataset = self.scaler.transform(self.prediction_dataset)
 
     def batch(self):
-        self.training_dataset = tf.data.Dataset.from_tensor_slices((self.normalized_dataset[:,:-1],
+        self.training_data = tf.data.Dataset.from_tensor_slices((self.normalized_dataset[:,:-1],
         self.normalized_dataset[:,-1]))
-        self.training_dataset = self.training_dataset.batch(1,drop_remainder=True).batch(1,drop_remainder=True)
+        self.training_dataset = self.training_data.batch(8,drop_remainder=True).batch(1,drop_remainder=True)
         self.prediction_dataset_batched = tf.data.Dataset.from_tensor_slices((self.normalized_prediction_dataset[:,:-1],
         self.normalized_prediction_dataset[:,-1]))
         self.prediction_dataset_batched = self.prediction_dataset_batched.batch(1,drop_remainder=True).batch(1, drop_remainder=True)
 
     def train(self):
         self.model = tf.keras.models.Sequential([
-                     tf.keras.layers.LSTM(64, input_shape=(1, self.dataset.shape[1] - 1)),
+                     tf.keras.layers.LSTM(64, input_shape=(None,self.dataset.shape[1] - 1)),
                      tf.keras.layers.Dropout(.20),
                      tf.keras.layers.Dense(64, activation='relu'),
                      tf.keras.layers.Dense(1)])
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
-        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss',verbose=1,mode='min',patience=4)
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss',verbose=5,mode='min',patience=4)
         self.model.compile(optimizer=self.optimizer,loss='mse')
         self.model.fit(self.training_dataset,verbose=2,epochs=1,callbacks=self.early_stopping)
 
     def predict(self):
-        self.training_points = self.model.predict(self.training_dataset)
+        self.training_preds = self.training_data.batch(1,drop_remainder=True).batch(1,drop_remainder=True)
+        self.training_points = self.model.predict(self.training_preds)
         self.predictions = self.model.predict(self.prediction_dataset_batched)
 
     def renormalize(self):
-        x = list(self.training_dataset.as_numpy_iterator())
+        x = list(self.training_preds.as_numpy_iterator()) # do not renormalize any training data thats not in batches of 1
         z = list(self.prediction_dataset_batched.as_numpy_iterator())
         train_df = {}
         prediction_df = {}
@@ -136,7 +137,7 @@ class TotalMarketModel:
 
 
 if __name__=='__main__':
-    Model = TotalMarketModel()
+    Model = Model()
     Model.one_hot_encode()
     Model.normalize()
     Model.batch()
