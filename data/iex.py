@@ -6,22 +6,15 @@ from config.configs import *
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
 class Iex:
-    def __init__(self, production=False):
-        if production:
-            self.token = os.getenv('PRODUCTION_TOKEN')
-            self.base_url = 'https://cloud.iexapis.com/'
-            self.engine = os.getenv('POSTGRES_PROD_URL')
-        else:
-            self.token = os.getenv('SANDBOX_TOKEN')
-            self.base_url = 'https://sandbox.iexapis.com/'
-            self.engine = os.getenv('POSTGRES_DEV_URL')
-
+    def __init__(self):
+        self.base_url = BASE_URL
+        self.token = TOKEN
+        self.engine = POSTGRES_URL
         self.version = 'stable'
 
     @staticmethod
@@ -40,19 +33,19 @@ class Iex:
             df.iloc[:, i] = df.iloc[:, i].fillna(m)
         return df
 
+    @staticmethod
+    def _shares_outstanding(symbol):
+        """        GET / stock / {symbol} / stats / {stat?}"""
+        url = f'https://cloud.iexapis.com/stable/stock/{symbol}/stats/sharesOutstanding'
+        r = requests.get(url, params={'token': os.getenv('PRODUCTION_TOKEN')})
+        return int(r.text)
 
-class Pipeline(Iex):
-    def __init__(self, production=False):
-        super().__init__(production)
-        self.url = self.base_url + self.version + '/time-series/'
-        self.active_endpoints = 'FUNDAMENTALS'
-
-    def timeseries_inventory(self):
+    def _timeseries_inventory(self):
         url = 'https://cloud.iexapis.com/' + 'stable/' + 'time-series'
         r = requests.get(url=url, params={'token': os.getenv("PRODUCTION_TOKEN")})
         return self._json_to_dataframe(r)
 
-    def timeseries_metadata(self, time_series_id=None, stock=None, subkey='ttm'):
+    def _timeseries_metadata(self, time_series_id=None, stock=None, subkey='ttm'):
         """See how many records IEX has to offer for a given time series for a given stock.
         Passing None for both time_series_id and stock gives you all the metadata
         (all time series for all stocks).
@@ -75,6 +68,13 @@ class Pipeline(Iex):
         r = requests.get(url, params={'token': os.getenv("PRODUCTION_TOKEN")})
         return self._json_to_dataframe(r)
 
+
+class Pipeline(Iex):
+    def __init__(self):
+        super().__init__()
+        self.url = self.base_url + self.version + '/time-series/'
+        self.active_endpoints = 'FUNDAMENTALS'
+
     # Fix the index of this dataframe
     def fundamentals(self, stock, subkey='ttm', last=5):
         assert subkey in ['ttm', 'quarterly'], 'Subkey must be ttm or quarterly'
@@ -92,13 +92,6 @@ class Pipeline(Iex):
         r = requests.get(url, params={'token': self.token, 'from': last_n_years})
         return self._json_to_dataframe(r)
 
-    @staticmethod
-    def shares_outstanding(symbol):
-        """        GET / stock / {symbol} / stats / {stat?}"""
-        url = f'https://cloud.iexapis.com/stable/stock/{symbol}/stats/sharesOutstanding'
-        r = requests.get(url, params={'token': os.getenv('PRODUCTION_TOKEN')})
-        return int(r.text)
-
     def pull_latest(self, stock):
         """Pull the latest data for a stock.
         Arguments: stock {str} stock to find number of available records for.
@@ -107,29 +100,31 @@ class Pipeline(Iex):
         # when we have multiple endpoints we should incorporate some dictionaries to
         # pull latest
         metadata = {}  # -> perhaps a dict comprehension to retrieve metadata with form
-                        # {'FUNDAMENTALS': metadata_df, 'TREASURY': metadata_df}
-        metadata = self.timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
+        # {'FUNDAMENTALS': metadata_df, 'TREASURY': metadata_df}
+        metadata = self._timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
+        print(metadata)
+        if metadata.empty:
+            logger.warning(f'No data for {stock}')
+            return
         # Retrieve the "count" entry in the metadata
         n_records = metadata.loc[(metadata['subkey'] == 'TTM')]['count']
         logger.info(f'There were {int(n_records)} TTM records found on IEX Cloud.')
-        # TODO Why is this not count?
-        #try: current_records = pd.read_sql(f"SELECT * FROM fundamentals.fundamentals WHERE symbol='{stock}';", self.engine)
-        #current_records = len(current_records.loc[(current_records['symbol'] == stock)]['symbol'])
-        current_records = 0
-        n_records = int(n_records) - int(current_records)
-        df = self.fundamentals(stock, last=n_records) if n_records != 0 else logger.info(
+        current_records = int(pd.read_sql(f"SELECT COUNT(*) FROM market.fundamentals WHERE symbol='{stock}';",
+                                          self.engine).squeeze())
+        n_records = int(n_records) - current_records
+        df = self.fundamentals(stock, last=n_records) if n_records > 0 else logger.info(
             f'Records up to date for {stock}')
-        if not df.empty: df.to_sql('fundamentals', self.engine, schema='fundamentals', if_exists='replace',index=False)
-        # Return the number of records we need to fetch, so that the int is accessible via XCOM (Cross communication,
-        # a way to pass parameters between tasks in a DAG)
+        if df is not None and not df.empty:
+            df.columns = map(str.lower, df.columns)  # make columns lowercase
+            df.to_sql('fundamentals', self.engine, schema='market', if_exists='append', index=False)
+            df = self._impute_row_data(df)
+            df.to_sql('fundamentals_imputed', self.engine, schema='market', if_exists='append', index=False)
+        return df
 
     def run(self, stocks: list):
         for stock in stocks:
             self.pull_latest(stock)
-            shares_outstanding = self.shares_outstanding(stock)
-            prices = UpdatePrices(stock, shares_outstanding)
 
 
-if __name__ == '__main__':
-    DataGetter = Pipeline()
-    DataGetter.run(['KO', 'MSFT'])
+pipeline = Pipeline()
+pipeline.run(['C', 'BAC'])
