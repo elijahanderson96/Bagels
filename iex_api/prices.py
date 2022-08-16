@@ -6,8 +6,10 @@ from yfinance import download
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+df = download('SPY MSFT',group_by='ticker',threads=True,auto_adjust=True) # df of dfs.
+df.MultiIndex
 
-class UpdatePrices:
+class StockPrice:
     def __init__(self, stock, shares_outstanding=None ,from_date=None):
         self.stock = stock
         self.shares_outstanding = shares_outstanding
