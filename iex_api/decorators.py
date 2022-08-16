@@ -6,7 +6,6 @@ import functools
 import numpy as np
 from transforms import interpolate
 
-
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -20,6 +19,7 @@ def cast_as_dataframe(func):
             temp = pd.DataFrame([entry], columns=list(entry.keys()))
             df = pd.concat([df, temp])
         return df
+
     return wrapper
 
 
@@ -35,14 +35,12 @@ def write_to_db(func):
             df.iloc[:, i] = df.iloc[:, i].fillna(m)
         if kwargs['interpolate']:
             logger.info('Interpolating...')
-            interpolate(df, date_col='reportDate',name=func.__name__)
-        df.to_sql(func.__name__,
-                  os.getenv('POSTGRES_CONNECTION'), if_exists='append', index=False)
+            interpolate(df, date_col='reportDate', name=func.__name__)
+        df.to_sql(name=func.__name__,
+                  con=os.getenv('POSTGRES_URL'),
+                  schema=kwargs['schema'],
+                  if_exists='append',
+                  index=False)
         logger.info(f'Writing dataframe of shape {df.shape} to {func.__name__}')
+
     return wrapper
-
-
-
-
-
-
