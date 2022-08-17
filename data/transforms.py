@@ -27,7 +27,7 @@ class FeaturePrep:
         and symbols into a class attribute, and returns all numeric data from the original data"""
         self.original_data.sort_values(by=['symbol', 'reportdate'], inplace=True)
         self.original_data['reportdate'] = self.original_data['reportdate'].astype('str')
-        self.original_data.drop_duplicates(inplace=True,subset=['reportdate'])
+        self.original_data.drop_duplicates(inplace=True, subset=['reportdate'])
         self.report_dates = pd.to_datetime(self.original_data.pop('reportdate'))
         self.symbols = self.original_data.pop('symbol')
         return self.original_data._get_numeric_data()
@@ -60,11 +60,11 @@ class FeaturePrep:
                 temp_values.update({'date': dates, 'symbol': symbol})
                 tmp_df = pd.DataFrame(temp_values)
                 df = pd.concat([df, tmp_df])
-        return df#.drop_duplicates(subset=['dates_interpolated', 'symbol'], inplace=True)
+        return df  # .drop_duplicates(subset=['dates_interpolated', 'symbol'], inplace=True)
 
     def _one_hot_encode(self, data):
-        dum_df = pd.get_dummies(data['symbol'], columns=['symbol'])
-        interpolated_data = data.join(dum_df)
+        data = pd.get_dummies(data, columns=['symbol'])
+        # data = data.join(dum_df)
         logger.info(f'The training dataset now has shape {data.shape} after one hot encoding')
         return data
 
@@ -72,28 +72,29 @@ class FeaturePrep:
         logger.info('Generating features and labels')
         logger.info(f'Interpolating data. Original data was of shape {self.original_data.shape}')
         data = self._interpolate()
-        data['date'] = pd.to_datetime(data['date']).dt.date
         logger.info(f'Shape is now {data.shape} after interpolating')
         symbols = ', '.join(self.symbols.unique().tolist())
-        if ',' in symbols: data = self._one_hot_encode()
+        if ',' in symbols: data = self._one_hot_encode(data)
         logger.info(f'Feature matrix created for {symbols}')
         labels = pd.read_sql('SELECT date, close '
                              "FROM market.stock_prices "
-                             "WHERE symbol in (%(symbols)s)",
+                             "WHERE symbol in %(symbols)s",
                              con=POSTGRES_URL,
-                             params={'symbols': symbols})
+                             params={'symbols': tuple(symbols.split(','))})
         logger.info('Fetching labels for aforementioned symbols')
         # one hot encode somewhere here
+        data['date'] = pd.to_datetime(data['date']).dt.date
+        labels['date'] = pd.to_datetime(labels['date']).dt.date
         self.labeled_data = pd.merge(left=data, right=labels, on='date')
         logger.info('Pasting labels on')
         return self.labeled_data
 
 
-data = pd.read_sql("SELECT * FROM market.fundamentals WHERE symbol='A'", con=POSTGRES_URL)
+data = pd.read_sql("SELECT * FROM market.fundamentals WHERE symbol in ('A','BAC')", con=POSTGRES_URL)
 
 self = FeaturePrep(data=data)
 labeled_data = self.create_feature_label_matrix()
-# labeled_data.to_sql()
+labeled_data.to_sql('model_data', con=POSTGRES_URL, schema='market', if_exists='replace')
 
 # get max date of fundamentals table for each symbol and max date of interpolated table.
 # if they dont match, find the entry that matches max and interpolate.
