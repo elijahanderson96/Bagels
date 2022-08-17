@@ -26,14 +26,6 @@ class Iex:
         return df
 
     @staticmethod
-    def _impute_row_data(df):
-        df.replace(0, np.nan, inplace=True)
-        m = df.mean(axis=1)
-        for i, col in enumerate(df):
-            df.iloc[:, i] = df.iloc[:, i].fillna(m)
-        return df
-
-    @staticmethod
     def _shares_outstanding(symbol):
         """        GET / stock / {symbol} / stats / {stat?}"""
         url = f'https://cloud.iexapis.com/stable/stock/{symbol}/stats/sharesOutstanding'
