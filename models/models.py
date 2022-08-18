@@ -60,8 +60,13 @@ class ModelBase:
         self.test_data = self.test_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
     def one_hot_encode(self):
-        self.train_data = pd.get_dummies(self.train_data, columns=['symbol'])
-        self.test_data = pd.get_dummies(self.test_data, columns=['symbol'])
+        columns = [col for col in self.train_data.columns if col not in ('marketcap', 'symbol')]
+        one_hot_columns = [col for col in self.sector]
+        total_cols = columns + one_hot_columns
+        self.train_data = pd.get_dummies(self.train_data, columns=['symbol'], prefix='', prefix_sep='')
+        self.test_data = pd.get_dummies(self.test_data, columns=['symbol'], prefix_sep='', prefix='')
+        total_cols.extend(['marketcap'])
+        self.train_data = self.train_data[total_cols]
 
     def train(self):
         if self.sector: self.one_hot_encode()  # dont need to one hot encode single models
@@ -101,12 +106,31 @@ class ModelBase:
         self.predictions = pd.DataFrame(self.scaler.inverse_transform(df_to_inverse_transform), columns=self.columns)
 
     def _market_cap_to_share_price(self):
-        if self.symbol: self.predictions = self.predictions[['symbol', 'date', 'marketcap']]
-        # symbols = self.predictions
-        # shares_outstanding = int(pd.read_sql(f'SELECT * '
-        #                                     f'FROM market.stock_prices '
-        #                                     f'WHERE symbol in {tuple(self.predictions["symbol"].unique())}',
-        #                                     con=POSTGRES_URL).squeeze())
+        if self.symbol:
+            self.predictions = self.predictions[['symbol', 'date', 'marketcap']]
+        else:
+            self._resolve_symbols()  # have to cast back after one hot encoding
+
+        symbols = self.predictions['symbol'].unique()
+        shares = pd.read_sql(f"SELECT symbol, shares_outstanding as so FROM market.stock_prices "
+                             f" WHERE symbol in {tuple(symbols)}",
+                             con=POSTGRES_URL)
+        tmp = []
+        for symbol in symbols:
+            n_shares = int(shares.loc[shares['symbol'] == symbol]['so'].unique().squeeze())
+            tmp_df = self.predictions.loc[self.predictions['symbol'] == symbol]
+            tmp_df['close'] = tmp_df['marketcap'].apply(lambda mkcap: mkcap / n_shares)
+            tmp.append(tmp_df)
+        self.predictions = pd.concat(tmp, ignore_index=True)
+
+    def _resolve_symbols(self):
+        tmp = []
+        for col in self.sector:  # for each symbol, go through and find where its equal to one.
+            tmp_df = self.predictions.loc[self.predictions[col] == 1]
+            tmp_df['symbol'] = col
+            tmp_df.drop(self.sector, axis=1, inplace=True)
+            tmp.append(tmp_df)
+        self.predictions = pd.concat(tmp, ignore_index=True)[['symbol', 'date', 'marketcap']]
 
 
 class SectorModel(ModelBase):
