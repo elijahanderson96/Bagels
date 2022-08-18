@@ -7,7 +7,7 @@ logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=loggi
 logger = logging.getLogger(__name__)
 
 
-class FeaturePrep:
+class Transform:
     def __init__(self, data):
         self.original_data = data
         self.labeled_data = None
@@ -85,7 +85,7 @@ class FeaturePrep:
         # one hot encode somewhere here
         data['date'] = pd.to_datetime(data['date']).dt.date
         labels['date'] = pd.to_datetime(labels['date']).dt.date
-        self.labeled_data = pd.merge(left=data, right=labels, on='date')
+        self.labeled_data = pd.merge(left=data, right=labels, on=['date', 'symbol'])
         logger.info('Pasting labels on')
         return self.labeled_data
 
