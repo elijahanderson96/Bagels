@@ -2,6 +2,7 @@ import logging
 from yfinance import download
 from config.common import *
 from data.iex import Iex
+from time import sleep
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -15,25 +16,46 @@ class Prices(Iex):
     def __init__(self):
         super().__init__()
 
+    @staticmethod
+    def resolve_min_date(symbol):
+        min_date_fundamentals = pd.read_sql(f'SELECT MIN(reportdate) '
+                                            f'FROM market.fundamentals '
+                                            f"WHERE symbol='{symbol}'",
+                                            POSTGRES_URL).squeeze()
+        max_date_fundamentals = pd.read_sql(f'SELECT MAX(reportdate) '
+                                            f'FROM market.fundamentals '
+                                            f"WHERE symbol='{symbol}'",
+                                            POSTGRES_URL).squeeze()
+        max_date_stock_prices = pd.read_sql(f'SELECT MAX(date) '
+                                            f'FROM market.stock_prices '
+                                            f"WHERE symbol='{symbol}'",
+                                            POSTGRES_URL).squeeze()
 
-    def _assign_stock_to_sector(self):
-        sectors = MARKET_DATA.loc[MARKET_DATA['Sector'].notnull()]['Sector']
-        stock_sector_mapping = pd.DataFrame(data={'stock': SYMBOLS, 'sector': sectors})
-        return stock_sector_mapping
+        return min_date_fundamentals, max_date_fundamentals, max_date_stock_prices
 
-    def fetch_stock_price(self):
-        from time import sleep
-        dfs = []
-        for symbol in SYMBOLS[0:5]:
-            sleep(1)
-            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True)  # ,period='1d')
-            df['symbol'] = symbol
-            df['shares_outstanding'] = super()._shares_outstanding(symbol)
-            df['marketCap'] = df['Close'] * df['shares_outstanding']
-            df.columns = map(str.lower, df.columns)  # make columns lowercase
-            dfs.append(df)
-        return pd.concat(dfs)
+    def fetch_stock_price(self, symbol):
+        sleep(1)
+        min_date, max_date, current_date = self.resolve_min_date(symbol)
+        if current_date:
+            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True,
+                          start=current_date)
+        else:
+            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True, start=min_date)
+        df['symbol'] = symbol
+        df['shares_outstanding'] = super()._shares_outstanding(symbol)
+        df['marketCap'] = df['Close'] * df['shares_outstanding']
+        df.reset_index(inplace=True)
+        return df.rename(columns={column: column.lower() for column in df.columns})
 
     def update_db(self):
-        prices_matrix = self.fetch_stock_price()
-        prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='replace')
+        for symbol in SYMBOLS:
+            prices_matrix = self.fetch_stock_price(symbol)
+            try:
+                prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='append',index=False)
+            except:
+                logger.warning('Could not insert stock prices into database. Likely a key error')
+
+
+if __name__ == '__main__':
+    obj = Prices()
+    obj.update_db()

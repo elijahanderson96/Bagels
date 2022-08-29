@@ -1,8 +1,8 @@
 import requests
 import pandas as pd
-import numpy as np
 import logging
 from config.configs import *
+from config.common import SYMBOLS
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
@@ -88,35 +88,38 @@ class Pipeline(Iex):
         """Pull the latest data for a stock.
         Arguments: stock {str} stock to find number of available records for.
         """
-        # Probe IEX Cloud to see how many records they have
-        # when we have multiple endpoints we should incorporate some dictionaries to
-        # pull latest
-        metadata = {}  # -> perhaps a dict comprehension to retrieve metadata with form
-        # {'FUNDAMENTALS': metadata_df, 'TREASURY': metadata_df}
         metadata = self._timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
-        print(metadata)
         if metadata.empty:
             logger.warning(f'No data for {stock}')
             return
-        # Retrieve the "count" entry in the metadata
-        n_records = metadata.loc[(metadata['subkey'] == 'TTM')]['count']
-        logger.info(f'There were {int(n_records)} TTM records found on IEX Cloud.')
-        current_records = int(pd.read_sql(f"SELECT COUNT(*) FROM market.fundamentals WHERE symbol='{stock}';",
-                                          self.engine).squeeze())
-        n_records = int(n_records) - current_records
+        n_records = int(metadata.loc[(metadata['subkey'] == 'TTM')]['count'])
+
+        try:
+            current_records = int(pd.read_sql(f"SELECT COUNT(*) "
+                                              f"FROM market.fundamentals "
+                                              f"WHERE symbol='{stock}';",
+                                              self.engine).squeeze())
+        except:
+            logger.info('Could not identify how many records were present.')
+            y_n = input('Do you wish to pull all records? (y/n): ')
+            if y_n == 'y':
+                current_records = 0
+            else:
+                current_records = n_records
+
+        n_records = n_records - current_records
+        logger.info(f'Fetching {n_records} records from IEX cloud for {stock}')
         df = self.fundamentals(stock, last=n_records) if n_records > 0 else logger.info(
             f'Records up to date for {stock}')
         if df is not None and not df.empty:
             df.columns = map(str.lower, df.columns)  # make columns lowercase
             df.to_sql('fundamentals', self.engine, schema='market', if_exists='append', index=False)
-            df = self._impute_row_data(df)
-            df.to_sql('fundamentals_imputed', self.engine, schema='market', if_exists='append', index=False)
         return df
 
     def run(self, stocks: list):
         for stock in stocks:
             self.pull_latest(stock)
 
-
-pipeline = Pipeline()
-pipeline.run(['C', 'BAC'])
+if __name__=='__main__':
+    pipeline = Pipeline()
+    pipeline.run(SYMBOLS)
