@@ -1,10 +1,12 @@
 import pandas as pd
+import numpy as np
 import tensorflow as tf
 import logging
 from config.configs import *
 from sklearn.preprocessing import MinMaxScaler
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
+from multiprocessing import Pool, cpu_count
 
 load_dotenv()
 
@@ -12,8 +14,72 @@ logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=loggi
 logger = logging.getLogger(__name__)
 
 
+class FeaturePrepper:
+    """Takes data from any endpoint and transform it. We impute row data such that
+    any zeros are replaced by the average value of the row, and interpolate the data such
+    that there's data for every day. It is a linear interpolation."""
+
+    def __init__(self, data):
+        self.original_data = data
+        self.chunked_data = None
+        self.labeled_data = None
+        self.symbols = None
+        self.report_dates = None
+        self.preprocess()
+
+    @staticmethod
+    def interpolate(df_chunk):
+        assert df_chunk['symbol'].iloc[0] == df_chunk['symbol'].iloc[1], 'symbols do not match'
+        df_chunk['reportdate'] = df_chunk['reportdate'].astype('datetime64')
+        n_days = abs((df_chunk['reportdate'].iloc[0] - df_chunk['reportdate'].iloc[1]).days)
+        dates = pd.date_range(df_chunk['reportdate'].iloc[0], df_chunk['reportdate'].iloc[1], freq='d')
+        temp_values = {}
+        for col in df_chunk.columns:
+            if col not in ('reportdate', 'symbol'):
+                tmp = []
+                for j in range(n_days + 1):
+                    number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
+                    tmp.append(number)
+                temp_values.update({col: tmp})
+        temp_values.update({'date': dates, 'symbol': df_chunk['symbol'].iloc[0]})
+        return pd.DataFrame(temp_values)
+
+    def preprocess(self):
+        """Sorts the values by symbols (if multiple) and report dates. Pops the report dates (after adding 91 days)
+        and symbols into a class attribute, and returns all numeric data from the original data"""
+        self.original_data.sort_values(by=['symbol', 'reportdate'], inplace=True)
+        self.original_data.drop_duplicates(inplace=True, subset=['symbol', 'reportdate'])  # add symbol
+        self.original_data['reportdate'] = pd.to_datetime(self.original_data['reportdate']) + timedelta(days=91)
+        report_dates = self.original_data['reportdate'].to_list()
+        symbols = self.original_data['symbol'].to_list()
+        self.original_data = self.original_data._get_numeric_data()
+        self.original_data['reportdate'] = report_dates
+        self.original_data['symbol'] = symbols
+        # keep only the columns in df that do not contain string
+        self.chunked_data = [self.original_data.iloc[i:i + 2] for i in range(len(self.original_data) - 1)
+                             if self.original_data['symbol'].iloc[i] == self.original_data['symbol'].iloc[i + 1]]
+
+    @staticmethod
+    def _impute_row_data(df):
+        df.replace(0, np.nan, inplace=True)
+        m = df.mean(axis=1)
+        for i, col in enumerate(df):
+            df.iloc[:, i] = df.iloc[:, i].fillna(m)
+        return df
+
+    def transform(self):
+        logger.info(f'Provisioning {cpu_count() - 1} cpus for transformation')
+        with Pool(cpu_count() - 1) as p:
+            dfs = p.map(self.interpolate, self.chunked_data)
+            df = pd.concat(dfs, ignore_index=True)
+        df = self._impute_row_data(df)
+        logger.info(f'Interpolation for {df["symbol"].unique()} complete')
+        return df
+
+
 class ModelBase:
     def __init__(self):
+        super().__init__()
         self.model_type = None
         self.train_data = None
         self.test_data = None
@@ -29,6 +95,7 @@ class ModelBase:
         self.scaler = MinMaxScaler()
         self.predictions = None
         self.trained = False
+        self.symbols = None
 
     def create_model(self):
         self.model = tf.keras.models.Sequential([
@@ -61,12 +128,14 @@ class ModelBase:
 
     def one_hot_encode(self):
         columns = [col for col in self.train_data.columns if col not in ('marketcap', 'symbol')]
-        one_hot_columns = [col for col in self.sector]
-        total_cols = columns + one_hot_columns
+        self.symbols = [col for col in self.sector if col in self.train_data['symbol'].to_list()]
+        total_cols = columns + self.symbols
         self.train_data = pd.get_dummies(self.train_data, columns=['symbol'], prefix='', prefix_sep='')
         self.test_data = pd.get_dummies(self.test_data, columns=['symbol'], prefix_sep='', prefix='')
         total_cols.extend(['marketcap'])
         self.train_data = self.train_data[total_cols]
+        print(self.train_data.sample(15).iloc[: -8:])
+        input('break')
 
     def train(self):
         if self.sector: self.one_hot_encode()  # dont need to one hot encode single models
@@ -74,8 +143,9 @@ class ModelBase:
         self.create_model()
         self.batch_train()
         self.model.compile(optimizer=self.optimizer, loss='mse')
-        self.model.fit(self.train_data, verbose=2, epochs=1, callbacks=self.early_stopping)
+        self.model.fit(self.train_data, verbose=2, epochs=3, callbacks=self.early_stopping)
         self.trained = True
+        return self
 
     def predict(self):
         assert self.trained, 'Must train model before attempting prediction'
@@ -83,6 +153,7 @@ class ModelBase:
         self.batch_test()
         self.predictions = self.model.predict(self.test_data)
         self.post_process()
+        return self
 
     def post_process(self):
         self._renormalize_test_data()
@@ -125,10 +196,10 @@ class ModelBase:
 
     def _resolve_symbols(self):
         tmp = []
-        for col in self.sector:  # for each symbol, go through and find where its equal to one.
+        for col in self.symbols:  # for each symbol, go through and find where its equal to one.
             tmp_df = self.predictions.loc[self.predictions[col] == 1]
             tmp_df['symbol'] = col
-            tmp_df.drop(self.sector, axis=1, inplace=True)
+            tmp_df.drop(self.symbols, axis=1, inplace=True)
             tmp.append(tmp_df)
         self.predictions = pd.concat(tmp, ignore_index=True)[['symbol', 'date', 'marketcap']]
 
@@ -150,19 +221,24 @@ class SectorModel(ModelBase):
         self._fetch_data()
 
     def _fetch_data(self):
-        self.data = pd.read_sql(f'SELECT * FROM market.fundamentals_interpolated '
-                                f"WHERE symbol in ('A','AA') "  # TODO MAKE DYNAMIC
-                                f'ORDER BY date ASC; ', con=POSTGRES_URL)
-        self.data['date'] = self.data['date'].astype('datetime64')
+        self.data = pd.read_sql(f'SELECT * FROM market.fundamentals '  # TODO MAKE DYNAMIC
+                                f'ORDER BY symbol, date ASC; ', con=POSTGRES_URL)
+        print(self.data)
+        # self.data.drop(inplace=True,columns=['date'])
+        # self.data.rename(columns={'reportdate':'date'},inplace=True)
+        # self.data['date'] = self.data['date'].astype('datetime64')
+        self.data = FeaturePrepper(self.data).transform()
+        print(self.data)
         self._train_test_split()
         self._assign_labels()
 
     def _assign_labels(self):
         logger.info(f'Assigning labels to the dataset')
         labels = pd.read_sql(f'SELECT date, close * shares_outstanding as marketcap, symbol '
-                             f'FROM market.stock_prices '
-                             f"WHERE symbol in ('A','AA')", con=POSTGRES_URL)
+                             f'FROM market.stock_prices', con=POSTGRES_URL)
         self.train_data = pd.merge(left=self.train_data, right=labels, on=['date', 'symbol'])
+        print(self.train_data.sample(15).iloc[:, -8:])
+        input('break')
         logger.info(f'Training data is now of shape {self.train_data.shape} for {self.symbol} after assigning labels')
 
     def _train_test_split(self):
@@ -196,10 +272,9 @@ class SingleModel(ModelBase):
         self._fetch_data()
 
     def _fetch_data(self):
-        self.data = pd.read_sql(f'SELECT * FROM market.fundamentals_interpolated '
-                                f"WHERE symbol='{self.symbol}' "
+        self.data = pd.read_sql(f'SELECT * FROM market.fundamentals '
                                 f'ORDER BY date ASC; ', con=POSTGRES_URL)
-        self.data['date'] = self.data['date'].astype('datetime64')
+        self.data['date'] = self.data['date'].astype('datetime64[ns]')
         self._train_test_split()
         self._assign_labels()
 
@@ -221,5 +296,13 @@ class SingleModel(ModelBase):
 
 
 if __name__ == '__main__':
-    # model = SingleModel('A')
-    model = SectorModel(['A', 'AA'])
+    print('hello')
+    from config.common import SYMBOLS
+    model = SectorModel(sector=SYMBOLS)
+    print('instantiated')
+    model.train()
+    print('fitted')
+    model.predict()
+    print(model.predictions)
+    model.predictions.to_sql('predictions', con=POSTGRES_URL, schema='market', if_exists='replace', index=False,)
+
