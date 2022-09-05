@@ -5,7 +5,7 @@ from config.configs import *
 from config.common import SYMBOLS
 from datetime import date
 from dateutil.relativedelta import relativedelta
-
+from time import sleep
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ class Iex:
         self.base_url = BASE_URL
         self.token = TOKEN
         self.engine = POSTGRES_URL
-        self.version = 'stable'
+        self.version = 'v1/data/CORE/'
 
     @staticmethod
     def _json_to_dataframe(request):
@@ -64,14 +64,13 @@ class Iex:
 class Pipeline(Iex):
     def __init__(self):
         super().__init__()
-        self.url = self.base_url + self.version + '/time-series/'
-        self.active_endpoints = 'FUNDAMENTALS'
+        self.url = self.base_url + self.version
 
     # Fix the index of this dataframe
     def fundamentals(self, stock, subkey='ttm', last=5):
         assert subkey in ['ttm', 'quarterly'], 'Subkey must be ttm or quarterly'
         logger.info(f'Grabbing latest {last} fundamentals reports for {stock}.')
-        url = self.url + f'/FUNDAMENTALS/{stock}/{subkey}'
+        url = self.url + f'FUNDAMENTALS/{stock}/{subkey}'
         logger.info(f'Pinging {url} for fundamentals data')
         r = requests.get(url, params={'last': last, 'token': self.token})
         return self._json_to_dataframe(r)
@@ -88,11 +87,19 @@ class Pipeline(Iex):
         """Pull the latest data for a stock.
         Arguments: stock {str} stock to find number of available records for.
         """
-        metadata = self._timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
-        if metadata.empty:
-            logger.warning(f'No data for {stock}')
-            return
-        n_records = int(metadata.loc[(metadata['subkey'] == 'TTM')]['count'])
+        try:
+            metadata = self._timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
+            if metadata.empty:
+                logger.warning(f'No data for {stock}')
+                return
+            try:
+                n_records = int(metadata.loc[(metadata['subkey'] == 'TTM')]['count'])
+            except:
+                logger.warning('bad things happening')
+                n_records = 0
+        except:
+            n_records = 0
+            logger.warning(f'Could not  source metadata for {stock}, skipping')
 
         try:
             current_records = int(pd.read_sql(f"SELECT COUNT(*) "
@@ -109,15 +116,17 @@ class Pipeline(Iex):
 
         n_records = n_records - current_records
         logger.info(f'Fetching {n_records} records from IEX cloud for {stock}')
+
         df = self.fundamentals(stock, last=n_records) if n_records > 0 else logger.info(
             f'Records up to date for {stock}')
+
         if df is not None and not df.empty:
             df.columns = map(str.lower, df.columns)  # make columns lowercase
             df.to_sql('fundamentals', self.engine, schema='market', if_exists='append', index=False)
         return df
 
     def run(self, stocks: list):
-        for stock in stocks:
+        for stock in stocks[125:]:
             self.pull_latest(stock)
 
 if __name__=='__main__':
