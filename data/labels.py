@@ -56,7 +56,7 @@ class Prices(Iex):
         return df
 
     def update_db(self):
-        for symbol in HEALTHCARE_SECTOR:
+        for symbol in ['MMM','CAT']:
             prices_matrix = self.fetch_stock_price(symbol)
             try:
                 prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='append', index=False)

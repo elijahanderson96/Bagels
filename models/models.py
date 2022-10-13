@@ -1,140 +1,45 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import datetime
 import logging
 from config.configs import *
 from config.common import QUERIES
 from config.mappings import FINANCE_SECTOR, HEALTHCARE_SECTOR
 from sklearn.preprocessing import MinMaxScaler
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from multiprocessing import Pool, cpu_count
-
-load_dotenv()
+from data.transforms import FeaturePrepper
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-class FeaturePrepper:
-    """Takes data from any endpoint and transform it. We impute row data such that
-    any zeros are replaced by the average value of the row, and interpolate the data such
-    that there's data for every day. It is a linear interpolation."""
-
-    def __init__(self):
-        self.data = None
-        self.chunked_data = None
-        self.labeled_data = None
-        self.symbols = None
-        self.report_dates = None
-
-    @staticmethod
-    def interpolate(df_chunk):
-        assert df_chunk['symbol'].iloc[0] == df_chunk['symbol'].iloc[1], 'symbols do not match'
-        n_days = abs((df_chunk['reportdate'].iloc[0] - df_chunk['reportdate'].iloc[1]).days)
-        dates = pd.date_range(df_chunk['reportdate'].iloc[0], df_chunk['reportdate'].iloc[1], freq='d')
-        temp_values = {}
-        for col in df_chunk.columns:
-            if col not in ('reportdate', 'symbol'):
-                tmp = []
-                for j in range(n_days + 1):
-                    number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
-                    tmp.append(number)
-                temp_values.update({col: tmp})
-        temp_values.update({'date': dates, 'symbol': df_chunk['symbol'].iloc[0]})
-        return pd.DataFrame(temp_values)
-
-    def preprocess(self, interpolate=False):
-        """Sorts the values by symbols (if multiple) and report dates. Pops the report dates (after adding 91 days)
-        and symbols into a class attribute, and returns all numeric data from the original data"""
-        self.data.fillna(0, inplace=True)
-        if not interpolate:
-            self.data.sort_values(by=['reportdate'], inplace=True)
-        else:
-            self.data.sort_values(by=['symbol', 'reportdate'], inplace=True)
-        logger.info('Dropping any duplicate entries based on symbol and report date.')
-        self.data.drop_duplicates(inplace=True, subset=['symbol', 'reportdate'])  # add symbol
-        logger.info('Offsetting report date by 91 days (13 weeks)')
-        self.data['reportdate'] = pd.to_datetime(self.data['reportdate']) + timedelta(days=91)
-        self.fetch_numeric_data()
-        if interpolate:
-            logger.info('Chunking the dataframe to expedite interpolation')
-            self.chunked_data = [self.data.iloc[i:i + 2] for i in range(len(self.data) - 1)
-                                 if self.data['symbol'].iloc[i] == self.data['symbol'].iloc[i + 1]]
-            return
-        return self.data.rename(columns={'reportdate': 'date'})
-
-    def fetch_numeric_data(self):
-        """Save report dates and symbols, drop non-numeric """
-        report_dates = self.data['reportdate'].to_list()
-        symbols = self.data['symbol'].to_list()
-        self.data = self.data._get_numeric_data()
-        self.data['reportdate'] = report_dates
-        self.data['symbol'] = symbols
-
-    @staticmethod
-    def _impute_row_data(df):
-        df.replace(0, np.nan, inplace=True)
-        m = df.mean(axis=1)
-        for i, col in enumerate(df):
-            df.iloc[:, i] = df.iloc[:, i].fillna(m)
-        return df
-
-    def transform(self, data, interpolate=False):
-        """
-
-        Args:
-            data: Dataframe to prepare as input for the model.
-            interpolate: Whether to linearize data that is not on a day-to-day basis
-
-        Returns:
-
-        """
-        self.data = data
-        if not interpolate:
-            logger.info('Data is NOT being interpolated.')
-            return self.preprocess(interpolate=interpolate)
-        self.preprocess(interpolate=interpolate)
-        logger.info(f'Provisioning {cpu_count() - 1} cpus for transformation')
-        with Pool(cpu_count() - 1) as p:
-            dfs = p.map(self.interpolate, self.chunked_data)
-            df = pd.concat(dfs, ignore_index=True)
-            # df = self._impute_row_data(df)
-        logger.info(f'Interpolation for {", ".join(df["symbol"].unique())} complete')
-        return df
-
-
 class ModelBase:
     def __init__(self):
-        self.model_type = None
         self.train_data = None
+        self.validation_data = None
         self.test_data = None
         self.train_dates = None
+        self.validation_dates = None
         self.test_dates = None
-        self.symbol = None
-        self.sector = None
         self.model = None
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
-        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss', verbose=5, mode='min', patience=4)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0000005)
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss', verbose=5, mode='min', patience=20)
         self.model_size = None  # in gb
         self.columns = None
         self.scaler = MinMaxScaler()
         self.predictions = None
         self.trained = False
+        self.validate = False
         self.symbols = None
+        self.model_version = str(datetime.datetime.now()).replace(' ', '_')
 
     def create_model(self):
         self.model = tf.keras.models.Sequential([
-            tf.keras.layers.LSTM(64, input_shape=(None, self.train_data.shape[1] - 1)),
-            tf.keras.layers.Dropout(.20),
-            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.LSTM(512, input_shape=(None, self.train_data.shape[1] - 1)),
+            tf.keras.layers.Dense(256, input_shape=(None, self.train_data.shape[1] - 1)),
+            # tf.keras.layers.Dropout(.3),
             tf.keras.layers.Dense(1)])
-
-    def normalize_test(self):
-        self.test_dates = self.test_data.pop('date')
-        self.test_data['marketcap'] = [1] * len(self.test_data)
-        self.test_data = self.test_data._get_numeric_data()
-        self.test_data = self.scaler.transform(self.test_data)
 
     def normalize_train(self):
         self.train_dates = self.train_data.pop('date')
@@ -142,20 +47,41 @@ class ModelBase:
         self.columns = self.train_data.columns.to_list()
         self.train_data = self.scaler.fit_transform(self.train_data)
 
-    def batch_train(self, batch_size=1):
+    def normalize_validation(self):
+        self.validation_dates = self.validation_data.pop('date')
+        self.validation_data = self.validation_data._get_numeric_data()
+        self.validation_data = self.scaler.fit_transform(self.validation_data)
+
+    def normalize_test(self):
+        self.test_dates = self.test_data.pop('date').to_list()
+        self.test_data['marketcap'] = [1] * len(self.test_data)
+        self.test_data = self.test_data._get_numeric_data()
+        self.test_data = self.scaler.transform(self.test_data)
+
+    def batch_train(self, batch_size=64):
         self.train_data = tf.data.Dataset.from_tensor_slices((self.train_data[:, :-1], self.train_data[:, -1]))
         self.train_data = self.train_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
-    def batch_test(self, batch_size=1):
-        self.test_data = tf.data.Dataset.from_tensor_slices((self.test_data[:, :-1], self.test_data[:, -1]))
-        self.test_data = self.test_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
+    def batch_validation(self, batch_size=1):
+        self.validation_data = tf.data.Dataset.from_tensor_slices(
+            (self.validation_data[:, :-1], self.validation_data[:, -1]))
+        self.validation_data = self.validation_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
+
+    def batch_test(self):
+        self.test_data = tf.data.Dataset.from_tensor_slices(self.test_data[:, :-1])
+        self.test_data = self.test_data.batch(1, drop_remainder=True).batch(1, drop_remainder=True)
 
     def train(self):
         self.normalize_train()
+        if self.validate: self.normalize_validation()
         self.create_model()
+        self.model.summary()
         self.batch_train()
-        self.model.compile(optimizer=self.optimizer, loss='mse')
-        self.model.fit(self.train_data, verbose=2, epochs=5, callbacks=self.early_stopping)
+        if self.validate: self.batch_validation()
+        self.model.compile(optimizer=self.optimizer, loss='mae')
+        with tf.device('/device:GPU:0'):
+            self.model.fit(self.train_data, validation_data=self.validation_data, verbose=2, epochs=50000,
+                           callbacks=self.early_stopping)
         self.trained = True
         return self
 
@@ -163,44 +89,45 @@ class ModelBase:
         assert self.trained, 'Must train model before attempting prediction'
         self.normalize_test()
         self.batch_test()
-        self.predictions = self.model.predict(self.test_data)
+        self.predictions = np.squeeze(self.model.predict(self.test_data))
         self.post_process()
         return self
+
+    def save(self):
+        self.model_version = str(datetime.datetime.now()).replace(' ', '_')
+        self.model.save_weights(f'./saved_models/model_{date}')
+
+    def load(self, path_to_file):
+        self.model = tf.keras.models.load_model(path_to_file)
 
     def post_process(self):
         self.renormalize_test_data()
         self.market_cap_to_share_price()
 
     def renormalize_test_data(self):
-        x = list(self.test_data.as_numpy_iterator())
-        test_df = {}
-        for i in range(len(x)):
-            values = x[i][0][0][0]
-            test_df.update({i: values})
-        test_data = pd.DataFrame(test_df).transpose()
-        predictions = pd.DataFrame(self.predictions)
-        df_to_inverse_transform = pd.concat([test_data, predictions], axis=1, ignore_index=True)
-        self.predictions = pd.DataFrame(self.scaler.inverse_transform(df_to_inverse_transform), columns=self.columns)
+        data = pd.DataFrame(list(self.test_data.unbatch().unbatch().as_numpy_iterator()))
+        data['marketcap'] = self.predictions
+        self.predictions = pd.DataFrame(self.scaler.inverse_transform(data), columns=self.columns)
 
     def market_cap_to_share_price(self):
         self.resolve_symbols()
         symbols = self.predictions['symbol'].unique()
-        q = QUERIES['shares_outstanding'].replace('SYMBOLS', str(tuple(self.sector)))
+        q = QUERIES['shares_outstanding'].replace('SYMBOLS', f"'{self.sector[0]}'")
         shares = pd.read_sql(q, con=POSTGRES_URL)
         tmp = []
         for symbol in symbols:
             n_shares = int(shares.loc[shares['symbol'] == symbol]['so'].unique().squeeze())
-            tmp_df = self.predictions.loc[self.predictions['symbol'] == symbol]
+            tmp_df = self.predictions.loc[self.predictions['symbol'] == symbol].copy()
             tmp_df['close'] = tmp_df['marketcap'].apply(lambda mkcap: mkcap / n_shares)
             tmp.append(tmp_df)
         self.predictions = pd.concat(tmp, ignore_index=True)
 
     def resolve_symbols(self):
         tmp = []
-        for col in self.symbols:
-            tmp_df = self.predictions.loc[self.predictions[col] == 1]
+        for col in self.sector:
+            tmp_df = self.predictions.loc[self.predictions[col] == 1].copy()
             tmp_df['symbol'] = col
-            tmp_df.drop(self.symbols, axis=1, inplace=True)
+            tmp_df.drop(self.sector, axis=1, inplace=True)
             tmp.append(tmp_df)
         self.predictions = pd.concat(tmp, ignore_index=True).sort_values(by=['symbol'])
         self.predictions = self.predictions[['symbol', 'marketcap']]
@@ -208,45 +135,89 @@ class ModelBase:
 
 
 class SectorModel(ModelBase):
-    def __init__(self, sector, interpolate=False):
-        super().__init__()
-        # Sector is nothing more than a list of symbols. They are in no way constrained to a particular sector.
-        self.sector = sector
-        self.data = None
-        self.interpolate = interpolate
+    """Sector Model is used when building models for multiple symbols."""
 
-    def train(self):
-        self.gen_feature_matrix(self.interpolate)
-        super().train()
+    def __init__(self, sector):
+        super().__init__()
+        self.sector = sector
+        self.sector_string = ", ".join(self.sector)
+        self.data = None
+        self.validate = False
+        self.interpolate_data = False
+        self.interpolate_labels = False
+
+    def train(self, validate=False, interpolate_data=False, interpolate_labels=False):
+        """
+        Train the model.
+        Args:
+            validate: Whether to hold out a single data point (the latest quarterly report) to validate against
+            interpolate_data: Whether we want to linearly interpolate data between quarterly report dates
+            interpolate_labels: Whether we want to linearly interpolate labels between quarterly report dates,
+            or use the actual closing prices.
+
+        Returns:
+            self
+        """
+        self.validate = validate
+        self.interpolate_data = interpolate_data
+        self.interpolate_labels = interpolate_labels
+        self.gen_feature_matrix()
+        return super().train()
 
     def predict(self):
         super().predict()
 
-    def gen_feature_matrix(self, interpolate):
-        logger.info(f'Fetching current data for {", ".join(self.sector)}')
-        q = QUERIES['fundamentals'].replace('SYMBOLS', str(tuple(self.sector)))
-        data = pd.read_sql(q, con=POSTGRES_URL).drop(labels=['date'], axis=1)
-        transformer = FeaturePrepper()
-        self.data = transformer.transform(data, interpolate=interpolate)
+    def gen_feature_matrix(self):
+        self.fetch_data()
         self.train_test_split()
-        self.assign_labels()
+        if self.validate: self.train_validation_split()
+        self.transform_data()
         self.one_hot_encode()
 
+    def fetch_data(self):
+        logger.info(f'Fetching current data for {self.sector_string}')
+        q = QUERIES['fundamentals'].replace('SYMBOLS', f"'{self.sector[0]}'")
+        self.data = pd.read_sql(q, con=POSTGRES_URL).drop(labels=['date'], axis=1).rename(
+            columns={'reportdate': 'date'})
+        logger.info('Offsetting date by 91 days (13 weeks)')
+        self.data['date'] = pd.to_datetime(self.data['date']) + timedelta(days=91)
+        self.data.replace(0, np.nan, inplace=True)
+        self.data.dropna(how='all', axis=1, inplace=True)
+        self.data.replace(np.nan, 0, inplace=True)
+
+    def transform_data(self):
+        Prepper = FeaturePrepper()
+        # if we want both data and labels interpolated, gotta assign labels first, then transform
+        if self.interpolate_data and self.interpolate_labels:
+            self.assign_labels()
+            self.train_data = Prepper.transform(self.train_data, interpolate=True)
+            logger.info(f'Shape of training data after interpolate is {self.train_data.shape}')
+        # otherwise if we only want data, transform, then assign labels.
+        if self.interpolate_data and not self.interpolate_labels:
+            self.train_data = Prepper.transform(self.train_data, interpolate=True)
+            self.assign_labels()
+        return self.data
+
     def one_hot_encode(self):
+        """This function will one hot encode the symbol column"""
         self.columns = [col for col in self.train_data.columns if col not in ('marketcap', 'symbol')]
-        self.symbols = [col for col in self.sector]
-        self.columns += self.symbols
+        self.columns += self.sector + ['marketcap']
         self.train_data = pd.get_dummies(self.train_data, columns=['symbol'], prefix='', prefix_sep='')
         self.test_data = pd.get_dummies(self.test_data, columns=['symbol'], prefix_sep='', prefix='')
-        self.columns.append('marketcap')
+        if self.validate:
+            self.validation_data = pd.get_dummies(self.validation_data, columns=['symbol'], prefix='', prefix_sep='')
         self.train_data = self.train_data[self.columns]
+        self.validation_data = self.validation_data[self.columns]
 
     def assign_labels(self):
         logger.info(f'Assigning labels to the dataset')
-        q = QUERIES['labels'].replace('SYMBOLS', str(tuple(self.sector)))
+        q = QUERIES['labels'].replace('SYMBOLS', f"'{self.sector[0]}'")
         labels = pd.read_sql(q, con=POSTGRES_URL)
-        self.train_data = pd.merge(left=self.train_data, right=labels, on=['date', 'symbol'])
-        logger.info(f'Training data is now of shape {self.train_data.shape} for {", ".join(self.sector)}')
+        self.train_data = self.train_data.merge(labels, on=['date', 'symbol'])
+        logger.info(f'Training data is now of shape {self.train_data.shape} for {self.sector_string}')
+        if self.validate:
+            self.validation_data = self.validation_data.merge(labels, on=['date', 'symbol'])
+            logger.info(f'Validation data is of shape {self.validation_data.shape}')
 
     def train_test_split(self):
         """Splits the dataset into training and test based on the current date. Since we are
@@ -257,16 +228,25 @@ class SectorModel(ModelBase):
         self.train_data = self.train_data.loc[self.train_data['symbol'].isin(self.test_data['symbol'])]
         idx = self.test_data.groupby('symbol')['date'].transform(max) == self.test_data['date']
         self.test_data = self.test_data[idx]
-        self.sector = self.train_data.symbol.unique()
+        self.sector = list(self.train_data.symbol.unique())
         logger.info(f'Training data is of shape {self.train_data.shape}')
         logger.info(f'Testing data is of shape {self.test_data.shape}')
 
+    def train_validation_split(self):
+        logger.info('Splitting into train and validation sets')
+        idx = self.train_data.groupby('symbol')['date'].transform(max) == self.train_data['date']
+        self.validation_data = self.train_data[idx]
+        self.train_data = self.train_data.loc[~idx]
+        logger.info(f'Training data is of shape {self.train_data.shape}')
+        logger.info(f'Validation data is of shape {self.test_data.shape}')
+
 
 if __name__ == '__main__':
-    model = SectorModel(sector=HEALTHCARE_SECTOR[0:8], interpolate=True)
-    model.train()
+    x = [[i] for i in ['C', 'KO', 'PFE', 'AAPL', 'BAC', 'JPM']]
+    print(x)
+    # for stock in x:
+    model = SectorModel(sector=['INTC'])
+    model.train(validate=True, interpolate_data=True, interpolate_labels=True)
     model.predict()
     print(model.predictions)
-    input('Press enter to write to DB')
     model.predictions.to_sql('predictions', con=POSTGRES_URL, schema='market', if_exists='replace', index=False)
-

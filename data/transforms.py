@@ -1,10 +1,6 @@
-import datetime
-from multiprocessing import Pool, cpu_count
-import pandas as pd
-from config.configs import *
 import logging
-import numpy as np
-
+import pandas as pd
+from multiprocessing import Pool, cpu_count
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -14,23 +10,21 @@ class FeaturePrepper:
     any zeros are replaced by the average value of the row, and interpolate the data such
     that there's data for every day. It is a linear interpolation."""
 
-    def __init__(self, data):
-        self.original_data = data
+    def __init__(self):
+        self.data = None
         self.chunked_data = None
         self.labeled_data = None
         self.symbols = None
         self.report_dates = None
-        self.preprocess()
 
     @staticmethod
     def interpolate(df_chunk):
         assert df_chunk['symbol'].iloc[0] == df_chunk['symbol'].iloc[1], 'symbols do not match'
-        df_chunk['reportdate'] = df_chunk['reportdate'].astype('datetime64')
-        n_days = abs((df_chunk['reportdate'].iloc[0] - df_chunk['reportdate'].iloc[1]).days)
-        dates = pd.date_range(df_chunk['reportdate'].iloc[0], df_chunk['reportdate'].iloc[1], freq='d')
+        n_days = abs((df_chunk['date'].iloc[0] - df_chunk['date'].iloc[1]).days)
+        dates = pd.date_range(df_chunk['date'].iloc[0], df_chunk['date'].iloc[1], freq='d')
         temp_values = {}
         for col in df_chunk.columns:
-            if col not in ('reportdate', 'symbol'):
+            if col not in ('date', 'symbol'):
                 tmp = []
                 for j in range(n_days + 1):
                     number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
@@ -39,21 +33,27 @@ class FeaturePrepper:
         temp_values.update({'date': dates, 'symbol': df_chunk['symbol'].iloc[0]})
         return pd.DataFrame(temp_values)
 
-    def preprocess(self):
+    def preprocess(self, interpolate=False):
         """Sorts the values by symbols (if multiple) and report dates. Pops the report dates (after adding 91 days)
         and symbols into a class attribute, and returns all numeric data from the original data"""
-        self.original_data.sort_values(by=['symbol', 'reportdate'], inplace=True)
-        self.original_data.drop_duplicates(inplace=True, subset=['symbol', 'reportdate'])  # add symbol
-        self.original_data['reportdate'] = pd.to_datetime(self.original_data['reportdate']) + datetime.timedelta(
-            days=91)
-        report_dates = self.original_data['reportdate'].to_list()
-        symbols = self.original_data['symbol'].to_list()
-        self.original_data = self.original_data._get_numeric_data()
-        self.original_data['reportdate'] = report_dates
-        self.original_data['symbol'] = symbols
-        # keep only the columns in df that do not contain string
-        self.chunked_data = [self.original_data.iloc[i:i + 2] for i in range(len(self.original_data) - 1)
-                             if self.original_data['symbol'].iloc[i] == self.original_data['symbol'].iloc[i + 1]]
+        self.data.fillna(0, inplace=True)
+        self.data.sort_values(by=['symbol', 'date'], inplace=True)
+        logger.info('Dropping any duplicate entries based on symbol and report date.')
+        self.data.drop_duplicates(inplace=True, subset=['symbol', 'date'])  # add symbol
+        self.fetch_numeric_data()
+        if not interpolate: return
+        logger.info('Chunking the dataframe to expedite interpolation')
+        self.chunked_data = [self.data.iloc[i:i + 2] for i in range(len(self.data) - 1)
+                                 if self.data['symbol'].iloc[i] == self.data['symbol'].iloc[i + 1]]
+        return self.data
+
+    def fetch_numeric_data(self):
+        """Save report dates and symbols, drop non-numeric """
+        report_dates = self.data['date'].to_list()
+        symbols = self.data['symbol'].to_list()
+        self.data = self.data._get_numeric_data()
+        self.data['date'] = report_dates
+        self.data['symbol'] = symbols
 
     @staticmethod
     def _impute_row_data(df):
@@ -63,19 +63,25 @@ class FeaturePrepper:
             df.iloc[:, i] = df.iloc[:, i].fillna(m)
         return df
 
-    def transform(self):
+    def transform(self, data, interpolate=False):
+        """
+
+        Args:
+            data: Dataframe to prepare as input for the model.
+            interpolate: Whether to linearize data that is not on a day-to-day basis
+
+        Returns:
+
+        """
+        self.data = data
+        self.preprocess(interpolate=interpolate)
+        if not interpolate:
+            logger.info('Data is NOT being interpolated.')
+            return
         logger.info(f'Provisioning {cpu_count() - 1} cpus for transformation')
         with Pool(cpu_count() - 1) as p:
             dfs = p.map(self.interpolate, self.chunked_data)
             df = pd.concat(dfs, ignore_index=True)
-        df = self._impute_row_data(df)
-        logger.info(f'Interpolation for {df["symbol"].unique()} complete')
+            # df = self._impute_row_data(df)
+        logger.info(f'Interpolation for {", ".join(df["symbol"].unique())} complete')
         return df
-
-
-if __name__ == '__main__':
-    data = pd.read_sql("SELECT * FROM market.fundamentals", con=POSTGRES_URL)
-    self = FeaturePrepper(data=data)
-    data = self.transform()
-
-
