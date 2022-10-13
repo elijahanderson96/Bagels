@@ -95,7 +95,7 @@ class Pipeline(Iex):
             try:
                 n_records = int(metadata.loc[(metadata['subkey'] == 'TTM')]['count'])
             except:
-                logger.warning('bad things happening')
+                logger.warning('Could not find TTM in sub key.')
                 n_records = 0
         except:
             n_records = 0
@@ -126,7 +126,7 @@ class Pipeline(Iex):
         return df
 
     def run(self, stocks: list):
-        for stock in stocks[125:]:
+        for stock in stocks:
             self.pull_latest(stock)
 
 if __name__=='__main__':

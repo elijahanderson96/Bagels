@@ -3,7 +3,7 @@ import pandas as pd
 from helpers.helpers import parse_sql_file
 
 
-QUERIES = parse_sql_file(full_path='/Users/elijahanderson/PycharmProjects/Bagels/sql/queries.sql')
+QUERIES = parse_sql_file(full_path='/mnt/c/Users/Elijah/PycharmProjects/Bagels/sql/queries.sql')
 # MARKET_DATA = pd.read_csv('./app_data/total_market.csv')
 # MARKET_DATA['Symbol'] = MARKET_DATA['Symbol'].astype('str')
 # SYMBOLS = [sym for sym in MARKET_DATA['Symbol'] if '^' not in sym]
