@@ -6,6 +6,7 @@ from config.common import SYMBOLS
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from time import sleep
+
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -67,33 +68,48 @@ class Pipeline(Iex):
         self.url = self.base_url + self.version
 
     # Fix the index of this dataframe
-    def fundamentals(self, stock, subkey='ttm', last=5):
+    def fundamental_valuations(self, stock, subkey='ttm', last=5):
         assert subkey in ['ttm', 'quarterly'], 'Subkey must be ttm or quarterly'
         logger.info(f'Grabbing latest {last} fundamentals reports for {stock}.')
-        url = self.url + f'FUNDAMENTALS/{stock}/{subkey}'
+        url = self.url + f'FUNDAMENTAL_VALUATIONS/{stock}/{subkey}'
         logger.info(f'Pinging {url} for fundamentals data')
         r = requests.get(url, params={'last': last, 'token': self.token})
         return self._json_to_dataframe(r)
 
-    def treasury_rates(self, symbol, last=5):
-        """Only doing 10 year for now, id is dgs10"""
-        assert symbol in ['dgs10'], 'Only considering 10 year treasure rates at this time'
-        last_n_years = date.today() - relativedelta(years=last)
-        url = self.url + f'TREASURY/{symbol}'
-        r = requests.get(url, params={'token': self.token, 'from': last_n_years})
+    def cash_flow(self, stock, subkey='quarterly',last=1):
+        logger.info(f'Grabbing latest {last} cash flow reports for {stock}')
+        url = self.url + f'CASH_FLOW/{stock}/{subkey}'
+        logger.info(f'Pinging {url} for cash flow data')
+        r = requests.get(url, params={'last': last, 'token': self.token})
         return self._json_to_dataframe(r)
 
-    def pull_latest(self, stock):
+    def mortgage(self, last=1):
+        logger.info(f'Grabbing last {last} mortgage reports')
+        url = self.url + f'MORTGAGE'
+        logger.info(f'Pinging {url} for mortgage data')
+        r = requests.get(url, params={'last': last, 'token': self.token})
+        return self._json_to_dataframe(r)
+
+    def treasury_rates(self, last=5):
+        """Only doing 10 year for now, id is dgs10"""
+        logger.info(f'Grabbing last {last} treasury reports')
+        url = self.url + f'TREASURY'
+        logger.info(f'Pinging {url} for treasury data')
+        r = requests.get(url, params={'token': self.token, 'last':last})
+        return self._json_to_dataframe(r)
+
+    def pull_latest(self):
         """Pull the latest data for a stock.
         Arguments: stock {str} stock to find number of available records for.
         """
         try:
-            metadata = self._timeseries_metadata(time_series_id='FUNDAMENTALS', stock=stock)
+            metadata = self._timeseries_metadata(time_series_id='CASH_FLOW', stock=stock)
             if metadata.empty:
                 logger.warning(f'No data for {stock}')
                 return
             try:
-                n_records = int(metadata.loc[(metadata['subkey'] == 'TTM')]['count'])
+                print(metadata)
+                n_records = int(metadata.loc[(metadata['subkey'] == 'QUARTERLY')]['count'])
             except:
                 logger.warning('Could not find TTM in sub key.')
                 n_records = 0
@@ -103,7 +119,7 @@ class Pipeline(Iex):
 
         try:
             current_records = int(pd.read_sql(f"SELECT COUNT(*) "
-                                              f"FROM market.fundamentals "
+                                              f"FROM market.cash_flow "
                                               f"WHERE symbol='{stock}';",
                                               self.engine).squeeze())
         except:
@@ -117,18 +133,19 @@ class Pipeline(Iex):
         n_records = n_records - current_records
         logger.info(f'Fetching {n_records} records from IEX cloud for {stock}')
 
-        df = self.fundamentals(stock, last=n_records) if n_records > 0 else logger.info(
+        df = self.cash_flow(stock, last=n_records) if n_records > 0 else logger.info(
             f'Records up to date for {stock}')
 
         if df is not None and not df.empty:
             df.columns = map(str.lower, df.columns)  # make columns lowercase
-            df.to_sql('fundamentals', self.engine, schema='market', if_exists='append', index=False)
+            df.to_sql('cash_flow', self.engine, schema='market', if_exists='append', index=False)
         return df
 
     def run(self, stocks: list):
         for stock in stocks:
             self.pull_latest(stock)
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     pipeline = Pipeline()
     pipeline.run(SYMBOLS)

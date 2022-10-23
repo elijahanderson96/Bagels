@@ -2,7 +2,6 @@ from config.configs import *
 import pandas as pd
 from helpers.helpers import parse_sql_file
 
-
 QUERIES = parse_sql_file(full_path='/mnt/c/Users/Elijah/PycharmProjects/Bagels/sql/queries.sql')
 # MARKET_DATA = pd.read_csv('./app_data/total_market.csv')
 # MARKET_DATA['Symbol'] = MARKET_DATA['Symbol'].astype('str')
