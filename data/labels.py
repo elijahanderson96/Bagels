@@ -45,7 +45,7 @@ class Prices(Iex):
             df = download(symbol, group_by='ticker', auto_adjust=True, threads=True,
                           start=current_date, progress=False)
         else:
-            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True, start='2015-01-01', progress=False)
+            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True, start='2000-01-01', progress=False)
 
         df['symbol'] = symbol
         df['shares_outstanding'] = super()._shares_outstanding(symbol)
@@ -56,7 +56,7 @@ class Prices(Iex):
         return df
 
     def update_db(self):
-        for symbol in ['MMM','CAT']:
+        for symbol in SYMBOLS:
             prices_matrix = self.fetch_stock_price(symbol)
             try:
                 prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='append', index=False)
