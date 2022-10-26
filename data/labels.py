@@ -20,23 +20,23 @@ class Prices(Iex):
 
     @staticmethod
     def resolve_min_date(symbol):
-        min_date_fundamentals = pd.read_sql(f'SELECT MIN(reportdate) '
-                                            f'FROM market.fundamentals '
+        min_date_fundamental_valuations = pd.read_sql(f'SELECT MIN("asOfDate") '
+                                            f'FROM market.fundamental_valuations '
                                             f"WHERE symbol='{symbol}'",
                                             POSTGRES_URL).squeeze()
-        max_date_fundamentals = pd.read_sql(f'SELECT MAX(reportdate) '
-                                            f'FROM market.fundamentals '
+        max_date_fundamental_valuations = pd.read_sql(f'SELECT MAX("asOfDate") '
+                                            f'FROM market.fundamental_valuations '
                                             f"WHERE symbol='{symbol}'",
                                             POSTGRES_URL).squeeze()
+
         max_date_stock_prices = pd.read_sql(f'SELECT MAX(date) '
                                             f'FROM market.stock_prices '
                                             f"WHERE symbol='{symbol}'",
                                             POSTGRES_URL).squeeze()
 
-        return min_date_fundamentals, max_date_fundamentals, max_date_stock_prices
+        return min_date_fundamental_valuations, max_date_fundamental_valuations, max_date_stock_prices
 
     def fetch_stock_price(self, symbol):
-        sleep(1)
         min_date, max_date, current_date = self.resolve_min_date(symbol)
         logger.info(f'Currently fetching stock prices for {symbol}')
         logger.info(f'Max Date: {max_date}, Min Date: {min_date}, Currently in DB: {current_date}')
@@ -48,7 +48,7 @@ class Prices(Iex):
             df = download(symbol, group_by='ticker', auto_adjust=True, threads=True, start='2000-01-01', progress=False)
 
         df['symbol'] = symbol
-        df['shares_outstanding'] = super()._shares_outstanding(symbol)
+        df['shares_outstanding'] = super().shares_outstanding(symbol)
         df['marketCap'] = df['Close'] * df['shares_outstanding']
         df.reset_index(inplace=True)
         df.rename(columns={column: column.lower() for column in df.columns}, inplace=True)
