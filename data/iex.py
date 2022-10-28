@@ -18,9 +18,9 @@ class Iex:
         self.token = TOKEN
         self.engine = POSTGRES_URL
         self.version = 'v1/data/CORE/'
-        self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS', 'CASH_FLOW']
+        self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
         self.market_endpoints = ['MORTGAGE', 'TREASURY']
-        self.endpoints = self.stock_endpoints + self.market_endpoints
+        self.endpoints =  self.market_endpoints + self.stock_endpoints
         self.current_tables = pd.read_sql("SELECT table_name "
                                           "FROM information_schema.tables "
                                           "WHERE table_schema = 'market';",
@@ -76,10 +76,9 @@ class Iex:
         table = table.lower()
         if table not in self.current_tables:
             return 0  # indicates we have 0 records since the table does not exist
-
         current_records = {symbol: pd.read_sql(f'SELECT count(*) '
                                                f'FROM market.{table} '
-                                               f"WHERE symbol='{symbol}'", POSTGRES_URL).squeeze()}
+                                               f"WHERE key='{symbol}'", POSTGRES_URL).squeeze()}
 
         return current_records[symbol]
 
@@ -153,7 +152,10 @@ class Pipeline(Iex):
                 for key, count in keys_and_counts.items():
                     current_records = self.examine_current_records(endpoint_name, key)
                     records_to_pull = count - current_records
-                    self.ping_endpoint(endpoint_name, key, records_to_pull)
+                    try:
+                        self.ping_endpoint(endpoint_name, key, records_to_pull)
+                    except:
+                        print_exc()
 
         logger.info('All data has been updated')
 

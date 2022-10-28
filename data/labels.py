@@ -11,9 +11,7 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
 class Prices(Iex):
-    """This class is responsible for constructing the stocks and prices tables.
-    The prices table is updated daily. THe stocks table contains metadata regarding
-    what sector a stock is in."""
+    """This class is responsible for constructing the stock_prices table."""
 
     def __init__(self):
         super().__init__()
@@ -42,13 +40,14 @@ class Prices(Iex):
         logger.info(f'Max Date: {max_date}, Min Date: {min_date}, Currently in DB: {current_date}')
 
         if current_date:
-            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True,
-                          start=current_date, progress=False)
+            df = download(symbol, group_by='ticker', auto_adjust=True, start=current_date, progress=False)
         else:
-            df = download(symbol, group_by='ticker', auto_adjust=True, threads=True, start='2000-01-01', progress=False)
+            df = download(symbol, group_by='ticker', auto_adjust=True, start='2012-01-01', progress=False)
 
         df['symbol'] = symbol
-        df['shares_outstanding'] = super().shares_outstanding(symbol)
+        shares_outstanding = super().shares_outstanding(symbol)
+        if shares_outstanding == 0 : return
+        df['shares_outstanding'] = shares_outstanding
         df['marketCap'] = df['Close'] * df['shares_outstanding']
         df.reset_index(inplace=True)
         df.rename(columns={column: column.lower() for column in df.columns}, inplace=True)
@@ -56,13 +55,14 @@ class Prices(Iex):
         return df
 
     def update_db(self):
-        for symbol in SYMBOLS:
+        for symbol in ['BHVN', 'BRK.A', 'CABO', 'CCNE', 'CDR', 'CRD.B', 'DXYN', 'FBMS', 'HCI', 'HUSA', 'HWM', 'INGR', 'JAKK', 'NTES', 'RDUS', 'RETA', 'SAIL', 'TECH', 'UNFI']:
             prices_matrix = self.fetch_stock_price(symbol)
-            try:
-                prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='append', index=False)
-                logger.info(f'Inserted {prices_matrix.shape[0]} rows for {symbol} in stock prices')
-            except:
-                logger.warning('Could not insert stock prices into database. Likely a key error')
+            if prices_matrix:
+                try:
+                    prices_matrix.to_sql('stock_prices', con=POSTGRES_URL, schema='market', if_exists='append', index=False)
+                    logger.info(f'Inserted {prices_matrix.shape[0]} rows for {symbol} in stock prices')
+                except:
+                    logger.warning('Could not insert stock prices into database. Likely a key error')
 
 
 if __name__ == '__main__':

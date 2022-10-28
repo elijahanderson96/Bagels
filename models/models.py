@@ -10,6 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime, timedelta
 from data.transforms import FeaturePrepper
 from sklearn.model_selection import train_test_split
+from traceback import print_exc
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class ModelBase:
         self.validation_dates = None
         self.test_dates = None
         self.model = None
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.000003)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0003)
         self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', verbose=5, mode='min', patience=25,
                                                                restore_best_weights=True)
         self.model_size = None  # in gb
@@ -42,11 +43,13 @@ class ModelBase:
     def create_model(self):
         print(self.n_features)
         self.model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(self.n_features, input_shape=(None, self.train_data.shape[1] - 2)),
-            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 2)),
-            tf.keras.layers.Dense(int(self.n_features / 4), input_shape=(None, self.train_data.shape[1] - 2)),
-            tf.keras.layers.Dense(int(self.n_features / 8), input_shape=(None, self.train_data.shape[1] - 2)),
-            tf.keras.layers.Dense(1)])
+            tf.keras.layers.Dense(int(self.n_features * 1.25), input_shape=(None, self.train_data.shape[1] - 2),
+                                  activation='relu'),
+            tf.keras.layers.Dense(int(self.n_features / 1.25), input_shape=(None, self.train_data.shape[1] - 2),
+                                  activation='relu'),
+            tf.keras.layers.Dense(int(self.n_features / 2.5), input_shape=(None, self.train_data.shape[1] - 2),
+                                  activation='relu'),
+            tf.keras.layers.Dense(1, activation='relu')])
 
     def normalize_train(self):
         self.train_dates = self.train_data.pop('date')
@@ -84,7 +87,7 @@ class ModelBase:
         if self.validate: self.batch_validation()
         self.model.compile(optimizer=self.optimizer, loss='mse')
         with tf.device('/device:GPU:0'):
-            self.history = self.model.fit(self.train_data, validation_data=self.validation_data, verbose=2, epochs=1000,
+            self.history = self.model.fit(self.train_data, validation_data=self.validation_data, verbose=2, epochs=500,
                                           callbacks=self.early_stopping)
         self.trained = True
         return self
@@ -92,8 +95,8 @@ class ModelBase:
     def predict(self):
         assert self.trained, 'Must train model before attempting prediction'
         self.normalize_test()
-        self.batch_test()
-        self.predictions = np.squeeze(self.model.predict(self.test_data))
+        # self.batch_test()
+        self.predictions = np.squeeze(self.model(self.test_data[:, :-1]))
         self.post_process()
         return self
 
@@ -104,7 +107,7 @@ class ModelBase:
         self.model = tf.keras.models.load_model(path_to_file)
 
     def post_process(self):
-        data = pd.DataFrame(list(self.test_data.unbatch().unbatch().as_numpy_iterator()))
+        data = pd.DataFrame(self.test_data, columns=self.columns)
         data['marketcap'] = self.predictions
         self.predictions = pd.DataFrame(self.scaler.inverse_transform(data), columns=self.columns)
         self.market_cap_to_share_price()
@@ -131,7 +134,6 @@ class ModelBase:
             tmp_df.drop(self.sector, axis=1, inplace=True)
             tmp.append(tmp_df)
         self.predictions = pd.concat(tmp, ignore_index=True).sort_values(by=['symbol'])
-        self.predictions = self.predictions[['symbol', 'marketcap']]
         self.predictions['date'] = self.test_dates
 
 
@@ -175,15 +177,14 @@ class SectorModel(ModelBase):
         if self.validate: self.train_validation_split()
         self.transform_data()
         self.one_hot_encode()
+        self.n_features = self.train_data.shape[1]
 
     def fetch_data(self):
         logger.info(f'Fetching current data for {self.sector_string}')
         q = QUERIES['fundamental_valuations'].replace('SYMBOLS',
                                                       f"{str(tuple(self.sector)) if len(self.sector) > 1 else str(tuple(self.sector)).replace(',)', ')')}")
-        self.data = pd.read_sql(q, con=POSTGRES_URL).rename(
-            columns={'filingDate': 'date'})
+        self.data = pd.read_sql(q, con=POSTGRES_URL)
         logger.info('Offsetting date by 91 days (13 weeks)')
-        self.n_features = self.data.shape[1]
         self.data['date'] = pd.to_datetime(self.data['date']) + timedelta(days=91)
         self.data.replace(0, np.nan, inplace=True)
         self.data.dropna(how='all', axis=1, inplace=True)
@@ -215,6 +216,12 @@ class SectorModel(ModelBase):
         if self.validate:
             self.validation_data = pd.get_dummies(self.validation_data, columns=['symbol'], prefix='', prefix_sep='')
         self.train_data = self.train_data[self.columns]
+
+        # validation data is randomly sampled and may not have all symbols. This loop ensures
+        # that all symbols are one hot encoded (which is required because data must be of same shape
+        for col in self.columns:
+            if col not in self.validation_data.columns:
+                self.validation_data[col] = 0
         self.validation_data = self.validation_data[self.columns]
 
     def assign_labels(self):
@@ -237,21 +244,23 @@ class SectorModel(ModelBase):
         self.train_data = self.train_data.loc[self.train_data['symbol'].isin(self.test_data['symbol'])]
         idx = self.test_data.groupby('symbol')['date'].transform(max) == self.test_data['date']
         self.test_data = self.test_data[idx]
-        self.sector = list(self.train_data['symbol'].unique())
+        self.sector = list(self.test_data['symbol'].unique())
         logger.info(f'Training data is of shape {self.train_data.shape}')
         logger.info(f'Testing data is of shape {self.test_data.shape}')
 
     def train_validation_split(self):
         logger.info('Splitting into train and validation sets')
         if len(self.train_data) > 2:
-            self.train_data, self.validation_data = train_test_split(self.train_data, test_size=0.1)
+            self.train_data, self.validation_data = train_test_split(self.train_data, test_size=0.2, shuffle=True)
         logger.info(f'Training data is of shape {self.train_data.shape}')
         logger.info(f'Validation data is of shape {self.validation_data.shape}')
 
 
 if __name__ == '__main__':
-    for symbol in SYMBOLS:
-        model = SectorModel(sector=[symbol], model_type='fundamental_valuations')
+    SYMBOLS = [symbol for symbol in SYMBOLS if
+               symbol not in ['BHVN', 'BRK.A', 'CDR', 'CRD.B', 'RDUS', 'SAIL', 'DGLY', 'J', 'SPXC', 'AWI','AM','CLF']]
+    try:
+        model = SectorModel(sector=SYMBOLS, model_type='fundamental_valuations')
         model.train(validate=True, interpolate_data=True, interpolate_labels=True)
         model.predict()
         model.save()
@@ -260,5 +269,8 @@ if __name__ == '__main__':
         training_loss = model.history.history['loss'][index]
         model.predictions['val_loss'] = val_loss
         model.predictions['loss'] = training_loss
-        model.predictions.to_sql('predictions', con=POSTGRES_URL, schema='market', if_exists='append', index=False)
-
+        model.predictions.to_sql('predictions_test', con=POSTGRES_URL, schema='market', if_exists='replace',
+                                 index=False)
+    except:
+        print(print_exc())
+        print(f'Likely missing test data or labels for {symbol}')
