@@ -1,12 +1,10 @@
 import datetime
-import logging
-from sqlalchemy import create_engine
-from time import sleep
 from traceback import print_exc
+
+from sqlalchemy import create_engine
 from yfinance import download
 
 from config.common import *
-from config.mappings import *
 from data.iex import Iex
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)

@@ -1,13 +1,11 @@
 import logging
-import pandas as pd
-import requests
-from datetime import date
-from dateutil.relativedelta import relativedelta
-from sqlalchemy import create_engine
 from time import sleep
 from traceback import print_exc
 
-from config.common import SYMBOLS
+import pandas as pd
+import requests
+from sqlalchemy import create_engine
+
 from config.configs import *
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)

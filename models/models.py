@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timedelta
-from traceback import print_exc
 
 import numpy as np
 import pandas as pd
@@ -8,7 +7,7 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
-from config.common import MID_CAP_SYMBOLS, QUERIES
+from config.common import QUERIES
 from config.configs import *
 from data.transforms import FeaturePrepper
 
@@ -291,4 +290,3 @@ class SectorModel(ModelBase):
             self.train_data, self.validation_data = train_test_split(self.train_data, test_size=0.1, shuffle=True)
         logger.info(f'Training data is of shape {self.train_data.shape}')
         logger.info(f'Validation data is of shape {self.validation_data.shape}')
-
