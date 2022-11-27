@@ -292,20 +292,3 @@ class SectorModel(ModelBase):
         logger.info(f'Training data is of shape {self.train_data.shape}')
         logger.info(f'Validation data is of shape {self.validation_data.shape}')
 
-
-if __name__ == '__main__':
-    try:
-        self = SectorModel(sector=MID_CAP_SYMBOLS, model_type='fundamental_valuations')
-        self.train(validate=True, interpolate_data=False, interpolate_labels=False)
-        self.predict()
-        self.save()
-        val_loss = min(self.history.history['val_loss'])
-        index = self.history.history['val_loss'].index(val_loss)
-        training_loss = self.history.history['loss'][index]
-        self.all_scores['val_loss'] = val_loss
-        self.all_scores['loss'] = training_loss
-        self.all_scores.to_sql('predictions_test', con=POSTGRES_URL, schema='market', if_exists='replace',
-                               index=False)
-    except:
-        print(print_exc())
-        print(f'Likely missing test data or labels for {symbol}')
