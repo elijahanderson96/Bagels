@@ -1,4 +1,5 @@
 import logging
+
 import pandas as pd
 
 from config.configs import *
@@ -57,7 +58,6 @@ inner join (select symbol, max(date) as max_date from market.stock_prices group 
 WHERE t.marketcap BETWEEN 100000000000 AND 900000000000000
 AND t.symbol in {tuple(SYMBOLS)};
 """, con=POSTGRES_URL)['symbol'].unique().tolist()
-
 
 EXCLUDE_LIST = ['BHVN', 'BRK.A', 'CDR', 'CRD.B', 'RDUS', 'SAIL', 'DGLY', 'J', 'SPXC', 'AWI', 'AM', 'CLF',
                 'ABNB', 'BEKE', 'BNTX', 'CIVI', 'COIN', 'CPNG', 'ELV', 'ET', 'HOOD', 'PARA', 'PDD',

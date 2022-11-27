@@ -4,48 +4,49 @@ FROM market.stock_prices
 WHERE symbol in SYMBOLS;
 
 -- @~cash_flow
-SELECT * FROM market.cash_flow
+SELECT *
+FROM market.cash_flow
 WHERE symbol in SYMBOLS;
 
 -- @~fundamental_valuations
-SELECT "accountsPayableTurnover" ,
-"accountsReceivableTurnover",
-"altmanZScore",
-"assetsToEquity",
-"assetTurnover",
-"bookValuePerShare",
-"cashConversionCycle",
-"currentRatio",
-"daysInAccountsPayable",
-"daysInInventory",
-"daysInRevenueDeferred",
-"daysRevenueOutstanding",
-"debtToAssets",
-"debtToCapitalization",
-"debtToEbitda",
-"debtToEquity",
-"dividendPerShare",
-"dividendYield",
-"earningsYield",
-"ebitdaGrowth",
-"ebitdaMargin",
-"ebitGrowth",
-"ebitToInterestExpense",
-"ebitToRevenue",
-"evToEbit",
-"evToEbitda",
-"evToFcf",
-"evToInvestedCapital",
-"evToNopat",
-"evToOcf",
-"evToSales",
-"fcfYield",
-"fiscalQuarter",
-"fixedAssetTurnover",
-"freeCashFlow",
-"freeCashFlowGrowth",
-"freeCashFlowToRevenue",
-"filingDate" as date,
+SELECT "accountsPayableTurnover",
+       "accountsReceivableTurnover",
+       "altmanZScore",
+       "assetsToEquity",
+       "assetTurnover",
+       "bookValuePerShare",
+       "cashConversionCycle",
+       "currentRatio",
+       "daysInAccountsPayable",
+       "daysInInventory",
+       "daysInRevenueDeferred",
+       "daysRevenueOutstanding",
+       "debtToAssets",
+       "debtToCapitalization",
+       "debtToEbitda",
+       "debtToEquity",
+       "dividendPerShare",
+       "dividendYield",
+       "earningsYield",
+       "ebitdaGrowth",
+       "ebitdaMargin",
+       "ebitGrowth",
+       "ebitToInterestExpense",
+       "ebitToRevenue",
+       "evToEbit",
+       "evToEbitda",
+       "evToFcf",
+       "evToInvestedCapital",
+       "evToNopat",
+       "evToOcf",
+       "evToSales",
+       "fcfYield",
+       "fiscalQuarter",
+       "fixedAssetTurnover",
+       "freeCashFlow",
+       "freeCashFlowGrowth",
+       "freeCashFlowToRevenue",
+       "filingDate" as date,
 "goodwillTotal",
 "incomeNetPerWabso",
 "incomeNetPerWabsoSplitAdjusted",
@@ -95,7 +96,7 @@ symbol,
 "workingCapitalTurnover"
 FROM market.fundamental_valuations
 WHERE symbol in SYMBOLS
-AND subkey='ttm';
+  AND subkey='ttm';
 
 -- @~shares_outstanding
 SELECT symbol, shares_outstanding as so
@@ -109,6 +110,7 @@ WHERE symbol='SYMBOL'
 ORDER BY date ASC
 
 -- @~fetch_latest_prices
-SELECT sp.symbol, sp.date as date_current_close, sp.close as current_close FROM market.stock_prices sp
-INNER JOIN (SELECT symbol, max(date) as max_date FROM market.stock_prices GROUP BY symbol) ag
-    ON sp.symbol=ag.symbol AND sp.date=ag.max_date;
+SELECT sp.symbol, sp.date as date_current_close, sp.close as current_close
+FROM market.stock_prices sp
+         INNER JOIN (SELECT symbol, max(date) as max_date FROM market.stock_prices GROUP BY symbol) ag
+                    ON sp.symbol = ag.symbol AND sp.date = ag.max_date;
