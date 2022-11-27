@@ -107,3 +107,8 @@ SELECT date, close
 FROM market.stock_prices
 WHERE symbol='SYMBOL'
 ORDER BY date ASC
+
+-- @~fetch_latest_prices
+SELECT sp.symbol, sp.date as date_current_close, sp.close as current_close FROM market.stock_prices sp
+INNER JOIN (SELECT symbol, max(date) as max_date FROM market.stock_prices GROUP BY symbol) ag
+    ON sp.symbol=ag.symbol AND sp.date=ag.max_date;

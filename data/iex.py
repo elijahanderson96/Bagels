@@ -1,17 +1,21 @@
-import requests
-import pandas as pd
 import logging
-from config.configs import *
-from config.common import SYMBOLS
+import pandas as pd
+import requests
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from sqlalchemy import create_engine
 from time import sleep
 from traceback import print_exc
+
+from config.common import SYMBOLS
+from config.configs import *
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
 class Iex:
     def __init__(self):
         self.base_url = BASE_URL
@@ -20,7 +24,7 @@ class Iex:
         self.version = 'v1/data/CORE/'
         self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
         self.market_endpoints = ['MORTGAGE', 'TREASURY']
-        self.endpoints =  self.market_endpoints + self.stock_endpoints
+        self.endpoints = self.market_endpoints + self.stock_endpoints
         self.current_tables = pd.read_sql("SELECT table_name "
                                           "FROM information_schema.tables "
                                           "WHERE table_schema = 'market';",
@@ -75,10 +79,13 @@ class Iex:
         of records for a symbol in that table. If a table doesn't exist, we return a count of 0"""
         table = table.lower()
         if table not in self.current_tables:
+            logger.warning(f'{table} DOES NOT EXIST IN DATABASE. PULLING ALL RECORDS')
             return 0  # indicates we have 0 records since the table does not exist
+        engine = create_engine(POSTGRES_URL)
         current_records = {symbol: pd.read_sql(f'SELECT count(*) '
                                                f'FROM market.{table} '
-                                               f"WHERE key='{symbol}'", POSTGRES_URL).squeeze()}
+                                               f"WHERE key='{symbol}'", engine).squeeze()}
+        engine.dispose()
 
         return current_records[symbol]
 
@@ -134,7 +141,7 @@ class Pipeline(Iex):
             df = self.mortgage(symbol, records_to_pull)
 
         try:
-            df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append',schema='market')
+            df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='market')
         except Exception:
             print_exc()
             logger.warning(f'Could not insert data for {symbol} within {endpoint_name}.')
@@ -150,6 +157,7 @@ class Pipeline(Iex):
             for endpoint_name, endpoint_info in endpoint.items():
                 keys_and_counts = dict(zip(endpoint_info['key'], endpoint_info['count']))
                 for key, count in keys_and_counts.items():
+                    sleep(.1)
                     current_records = self.examine_current_records(endpoint_name, key)
                     records_to_pull = count - current_records
                     try:
@@ -158,6 +166,7 @@ class Pipeline(Iex):
                         print_exc()
 
         logger.info('All data has been updated')
+
 
 if __name__ == '__main__':
     pipeline = Pipeline()
