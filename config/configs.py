@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+
 from config.filepaths import *
 
 load_dotenv(PATH_TO_DOTENV, verbose=True, override=True)
@@ -15,4 +16,3 @@ else:
     POSTGRES_URL = os.getenv('POSTGRES_DEV_URL')
     TOKEN = os.getenv('SANDBOX_TOKEN')
     BASE_URL = os.getenv('SANDBOX_IEX_URL')
-
