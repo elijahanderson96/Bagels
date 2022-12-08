@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+from datetime import timedelta
 from multiprocessing import Pool, cpu_count
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -11,7 +12,8 @@ class FeaturePrepper:
     that there's data for every day. It is a linear interpolation."""
 
     def __init__(self):
-        self.data = None
+        self.data = None # fundamentals data
+        self.macro_data = None
         self.chunked_data = None
         self.labeled_data = None
         self.symbols = None
@@ -31,6 +33,21 @@ class FeaturePrepper:
                     tmp.append(number)
                 temp_values.update({col: tmp})
         temp_values.update({'date': dates, 'symbol': df_chunk['symbol'].iloc[0]})
+        return pd.DataFrame(temp_values)
+
+    @staticmethod
+    def interpolate_macro_data(df_chunk):
+        n_days = abs((df_chunk['date'].iloc[0] - df_chunk['date'].iloc[1]).days)
+        dates = pd.date_range(df_chunk['date'].iloc[0], df_chunk['date'].iloc[1], freq='d')
+        temp_values = {}
+        for col in df_chunk.columns:
+            if col not in ('date'):
+                tmp = []
+                for j in range(n_days + 1):
+                    number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
+                    tmp.append(number)
+                temp_values.update({col: tmp})
+        temp_values['date'] = dates
         return pd.DataFrame(temp_values)
 
     def preprocess(self, interpolate=False):
@@ -86,4 +103,18 @@ class FeaturePrepper:
         logger.info(f'Interpolation for {", ".join(df["symbol"].unique())} complete')
         return df
 
+
+    def transform_macro_data(self, macro_data: list):
+        dfs = []
+        for df in macro_data:
+            df['date'] = df['date'].astype('datetime64[ns]')
+            df.drop_duplicates(subset=['date'],inplace=True)
+            df.sort_values(inplace=True,by='date')
+            chunked_data = [df.iloc[i:i + 2] for i in range(len(df) - 1)]
+            df_interpolated = [self.interpolate_macro_data(chunk) for chunk in chunked_data]
+            df_interpolated = pd.concat(df_interpolated, ignore_index=True)
+            df_interpolated['date'] = pd.to_datetime(df_interpolated['date']) + timedelta(days=91)
+            dfs.append(df_interpolated)
+        logger.info(f'Interpolation for macrodata complete')
+        return dfs
 

@@ -25,7 +25,7 @@ class ModelBase:
         self.test_dates = None
         self.model = None
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.000009)
-        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', verbose=5, mode='min', patience=350,
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', verbose=5, mode='min', patience=100,
                                                                restore_best_weights=True)
         self.model_size = None  # in gb
         self.columns = None
@@ -38,6 +38,14 @@ class ModelBase:
         self.model_tester_data = []
         self.history = None
         self.n_features = None
+        self.macro_queries = [
+            # 'fetch_real_gdp', 'fetch_fed_funds', 'fetch_comm_paper_outstanding',
+            ##'fetch_unemployment_claims', 'fetch_cpi', 'fetch_vehicle_sales', 'fetch_unemployment_rate',
+            # 'fetch_industrial_production', 'fetch_housing_starts', 'fetch_num_total_employees',
+            # 'fetch_recession_probability',
+            'fetch_15Ymortgage_rates', 'fetch_5Ymortgage_rates',
+            'fetch_30Ymortgage_rates',
+        ]
 
     def create_model(self):
         self.model = tf.keras.models.Sequential([
@@ -47,6 +55,8 @@ class ModelBase:
                                   activation='relu'),
             tf.keras.layers.Dense(int(self.n_features / 1.75), input_shape=(None, self.train_data.shape[1] - 2),
                                   activation='relu'),
+            tf.keras.layers.Dense(int(self.n_features / 2.25), input_shape=(None, self.train_data.shape[1] - 2),
+                                  activation='relu'),
             tf.keras.layers.Dense(int(self.n_features / 3), input_shape=(None, self.train_data.shape[1] - 2),
                                   activation='relu'),
             tf.keras.layers.Dense(1, activation='relu')])
@@ -54,6 +64,7 @@ class ModelBase:
     def normalize_train(self):
         self.train_dates = self.train_data.pop('date')
         self.columns = self.train_data.columns.to_list()
+        print(self.train_data.head(5))
         self.train_data = self.scaler.fit_transform(self.train_data)
 
     def normalize_validation(self):
@@ -65,7 +76,7 @@ class ModelBase:
         self.test_data['marketcap'] = [1] * len(self.test_data)
         self.test_data = self.scaler.transform(self.test_data)
 
-    def batch_train(self, batch_size=32):
+    def batch_train(self, batch_size=8):
         self.train_data = tf.data.Dataset.from_tensor_slices((self.train_data[:, :-1], self.train_data[:, -1]))
         self.train_data = self.train_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
@@ -112,9 +123,9 @@ class ModelBase:
     def post_process(self):
         prediction_data = pd.DataFrame(list(self.test_data.unbatch().unbatch().as_numpy_iterator()),
                                        columns=self.columns[:-1])
-        training_data = pd.DataFrame(
-            [np.append(arr=i[0], values=i[1]) for i in list(self.train_data.unbatch().unbatch().as_numpy_iterator())],
-            columns=self.columns)
+        training_data = pd.DataFrame([np.append(arr=i[0], values=i[1])
+                                      for i in list(self.train_data.unbatch().unbatch().as_numpy_iterator())],
+                                     columns=self.columns)
         validation_data = pd.DataFrame([np.append(arr=i[0], values=i[1]) for i in
                                         list(self.validation_data.unbatch().unbatch().as_numpy_iterator())],
                                        columns=self.columns)
@@ -224,8 +235,22 @@ class SectorModel(ModelBase):
         self.fundamental_valuation_data.dropna(how='all', axis=1, inplace=True)
         self.fundamental_valuation_data.replace(np.nan, 0, inplace=True)
 
+        macro_data = self.fetch_macro_data()
+        for df in macro_data:
+            self.fundamental_valuation_data = self.fundamental_valuation_data.merge(df, on='date', how='left')
+        self.fundamental_valuation_data.drop_duplicates(inplace=True, subset=['date', 'symbol'])
+        self.fundamental_valuation_data.replace(np.nan, 0, inplace=True)
+
+    def fetch_macro_data(self):
+        logger.info(f'Fetching macro economic data from database.')
+        macro_dataframes = [pd.read_sql(QUERIES[q], con=POSTGRES_URL) for q in self.macro_queries]
+        prepper = FeaturePrepper()
+        macro_dataframes = prepper.transform_macro_data(macro_dataframes)
+        return macro_dataframes
+
     def transform_data(self):
         Prepper = FeaturePrepper()
+
         # if we want both data and labels interpolated, gotta assign labels first, then transform
         if self.interpolate_data and self.interpolate_labels:
             self.assign_labels()
@@ -268,6 +293,10 @@ class SectorModel(ModelBase):
         if self.validate:
             self.validation_data = self.validation_data.merge(labels, on=['date', 'symbol'])
             logger.info(f'Validation data is of shape {self.validation_data.shape}')
+        self.train_data = self.train_data[
+            [col for col in self.train_data.columns if col != 'marketcap'] + ['marketcap']]
+        self.validation_data = self.validation_data[
+            [col for col in self.validation_data.columns if col != 'marketcap'] + ['marketcap']]
 
     def train_test_split(self):
         """Splits the dataset into training and test based on the current date. Since we are
