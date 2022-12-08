@@ -21,7 +21,7 @@ class Iex:
         self.engine = POSTGRES_URL
         self.version = 'v1/data/CORE/'
         self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
-        self.market_endpoints = ['MORTGAGE', 'TREASURY']
+        self.market_endpoints = ['MORTGAGE', 'ECONOMIC']
         self.endpoints = self.market_endpoints + self.stock_endpoints
         self.current_tables = pd.read_sql("SELECT table_name "
                                           "FROM information_schema.tables "
@@ -59,7 +59,6 @@ class Iex:
                 subkey: a filter parameter for the type of content returned.
             Returns:
                 DataFrame"""
-        assert subkey in ['ttm', 'quarterly', 'annual'], 'Subkey must be ttm,annual,or quarterly'
         url = f'https://cloud.iexapis.com/stable/metadata/time-series/'
         if time_series_id and stock and not subkey:
             url += f'{time_series_id}/{stock}'
@@ -123,6 +122,13 @@ class Pipeline(Iex):
         r = requests.get(url, params={'token': self.token, 'last': last})
         return self.json_to_dataframe(r)
 
+    def economic(self, term, last=1):
+        logger.info(f'Grabbing last {last} treasury reports for {term}')
+        url = self.url + f'ECONOMIC/{term}'
+        logger.info(f'Pinging {url} for treasury data')
+        r = requests.get(url, params={'token': self.token, 'last': last})
+        return self.json_to_dataframe(r)
+
     def ping_endpoint(self, endpoint_name, symbol, records_to_pull=0):
         """This is a rather crude but effective way of implementing which
         function to call when we invoke the update_data method."""
@@ -137,7 +143,8 @@ class Pipeline(Iex):
             df = self.treasury_rates(symbol, records_to_pull)
         if endpoint_name == 'MORTGAGE':
             df = self.mortgage(symbol, records_to_pull)
-
+        if endpoint_name == 'ECONOMIC':
+            df = self.economic(symbol, records_to_pull)
         try:
             df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='market')
         except Exception:
@@ -166,6 +173,3 @@ class Pipeline(Iex):
         logger.info('All data has been updated')
 
 
-if __name__ == '__main__':
-    pipeline = Pipeline()
-    pipeline.update_data()
