@@ -20,20 +20,11 @@ if __name__ == '__main__':
     prices.update_db()
     for company_size, symbols in sym_mkcap_mappings.items():
         symbols = [symbol for symbol in symbols if symbol not in EXCLUDE_LIST]
-        if company_size == 'SMALL_CAP':
-            try:
-                model = models.SectorModel(sector=symbols, model_type='fundamental_valuations')
-                model.train(validate=True, interpolate_data=False, interpolate_labels=False)
-                model.predict()
-                model.save()
-                val_loss = min(model.history.history['val_loss'])
-                index = model.history.history['val_loss'].index(val_loss)
-                training_loss = model.history.history['loss'][index]
-                model.all_scores['val_loss'] = val_loss
-                model.all_scores['loss'] = training_loss
-                model.all_scores.to_sql(f'predictions_{company_size}_{today}', con=POSTGRES_URL, schema='model_predictions',
-                                        if_exists='replace',
-                                        index=False)
-            except:
-                print(print_exc())
-                print(f'Likely missing test data or labels')
+        try:
+            model = models.SectorModel(sector=symbols, model_type=company_size)
+            model.train(validate=True, interpolate_data=False, interpolate_labels=False)
+            model.predict()
+            model.save()
+        except:
+            print(print_exc())
+            print(f'Likely missing test data or labels')

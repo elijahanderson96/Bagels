@@ -9,7 +9,8 @@ FROM market.cash_flow
 WHERE symbol in SYMBOLS;
 
 -- @~fundamental_valuations
-SELECT "accountsPayableTurnover",
+SELECT entry_id,
+       "accountsPayableTurnover",
        "accountsReceivableTurnover",
        "altmanZScore",
        "assetsToEquity",

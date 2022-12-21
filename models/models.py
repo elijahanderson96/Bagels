@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -14,6 +15,9 @@ from data.transforms import FeaturePrepper
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+import psycopg2
+from psycopg2.extensions import AsIs
+
 
 class ModelBase:
     def __init__(self):
@@ -25,7 +29,10 @@ class ModelBase:
         self.test_dates = None
         self.model = None
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.000009)
-        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', verbose=5, mode='min', patience=100,
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                               verbose=5,
+                                                               mode='min',
+                                                               patience=10,
                                                                restore_best_weights=True)
         self.model_size = None  # in gb
         self.columns = None
@@ -49,26 +56,32 @@ class ModelBase:
 
     def create_model(self):
         self.model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(self.n_features, input_shape=(None, self.train_data.shape[1] - 2),
+            tf.keras.layers.Dense(self.n_features / 1.25, input_shape=(None, self.train_data.shape[1] - 3),
                                   activation='relu'),
-            tf.keras.layers.Dense(int(self.n_features / 1.25), input_shape=(None, self.train_data.shape[1] - 2),
+            tf.keras.layers.Dense(int(self.n_features / 1.5), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation='relu'),
-            tf.keras.layers.Dense(int(self.n_features / 1.75), input_shape=(None, self.train_data.shape[1] - 2),
+            tf.keras.layers.Dense(int(self.n_features / 1.75), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation='relu'),
-            tf.keras.layers.Dense(int(self.n_features / 2.25), input_shape=(None, self.train_data.shape[1] - 2),
+            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation='relu'),
-            tf.keras.layers.Dense(int(self.n_features / 3), input_shape=(None, self.train_data.shape[1] - 2),
+            tf.keras.layers.Dense(int(self.n_features / 2.25), input_shape=(None, self.train_data.shape[1] - 3),
+                                  activation='relu'),
+            tf.keras.layers.Dense(int(self.n_features / 3), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation='relu'),
             tf.keras.layers.Dense(1, activation='relu')])
 
     def normalize_train(self):
-        self.train_dates = self.train_data.pop('date')
+        self.train_dates = self.train_data.pop('date').to_list()
+        self.metadata = {col: df.pop('entry_id').to_list() if isinstance(df, pd.DataFrame)
+                                                              and not df.empty else None
+                         for col, df in {'train_ids': self.train_data,
+                                         'validation_ids': self.validation_data,
+                                         'test_ids': self.test_data}.items()}
         self.columns = self.train_data.columns.to_list()
-        print(self.train_data.head(5))
         self.train_data = self.scaler.fit_transform(self.train_data)
 
     def normalize_validation(self):
-        self.validation_dates = self.validation_data.pop('date')
+        self.validation_dates = self.validation_data.pop('date').to_list()
         self.validation_data = self.scaler.transform(self.validation_data)
 
     def normalize_test(self):
@@ -76,18 +89,18 @@ class ModelBase:
         self.test_data['marketcap'] = [1] * len(self.test_data)
         self.test_data = self.scaler.transform(self.test_data)
 
-    def batch_train(self, batch_size=8):
+    def batch_train(self, batch_size=4):
         self.train_data = tf.data.Dataset.from_tensor_slices((self.train_data[:, :-1], self.train_data[:, -1]))
         self.train_data = self.train_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
-    def batch_validation(self, batch_size=8):
+    def batch_validation(self, batch_size=4):
         self.validation_data = tf.data.Dataset.from_tensor_slices(
             (self.validation_data[:, :-1], self.validation_data[:, -1]))
         self.validation_data = self.validation_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
     def batch_test(self):
         self.test_data = tf.data.Dataset.from_tensor_slices(self.test_data[:, :-1])
-        self.test_data = self.test_data.batch(1, drop_remainder=True).batch(8, drop_remainder=True)
+        self.test_data = self.test_data.batch(1, drop_remainder=True).batch(1, drop_remainder=True)
 
     def train(self):
         self.create_model()
@@ -102,6 +115,13 @@ class ModelBase:
                                           epochs=10000,
                                           callbacks=self.early_stopping)
         self.trained = True
+        self.metadata['date_created'] = datetime.now()
+        if self.validate:
+            val_loss = min(self.history.history['val_loss'])
+            index = self.history.history['val_loss'].index(val_loss)
+        training_loss = self.history.history['loss'][index]
+        self.metadata['val_loss'] = val_loss
+        self.metadata['loss'] = training_loss
         return self
 
     def predict(self):
@@ -112,6 +132,7 @@ class ModelBase:
         self.train_predictions = np.squeeze(self.model.predict(self.train_data))
         self.valid_predictions = np.squeeze(self.model.predict(self.validation_data))
         self.post_process()
+
         return self
 
     def save(self):
@@ -135,18 +156,29 @@ class ModelBase:
         validation_data['marketcap'] = self.valid_predictions.flatten()
 
         self.predictions = pd.DataFrame(self.scaler.inverse_transform(prediction_data), columns=self.columns)
-        self.predictions['data_type'] = 'test_data'
+        self.predictions['date'] = self.test_dates[0:len(self.predictions)]
+        self.predictions['entry_id'] = self.metadata['test_ids'][0:len(self.predictions)]
+        self.predictions['scores'] = 'test_scores'
+        self.metadata['test_ids'] = self.metadata['test_ids'][0:len(self.predictions)]
 
         self.train_predictions = pd.DataFrame(self.scaler.inverse_transform(training_data), columns=self.columns)
-        self.train_predictions['data_type'] = 'training_data'
+        self.train_predictions['date'] = self.train_dates[0:len(self.train_predictions)]
+        self.train_predictions['entry_id'] = self.metadata['train_ids'][0:len(self.train_predictions)]
+        self.train_predictions['scores'] = 'train_scores'
+
+        self.metadata['train_ids'] = self.metadata['train_ids'][0:len(self.train_predictions)]
 
         self.validation_predictions = pd.DataFrame(self.scaler.inverse_transform(validation_data), columns=self.columns)
-        self.validation_predictions['data_type'] = 'validation_data'
+        self.validation_predictions['date'] = self.validation_dates[0:len(self.validation_predictions)]
+        self.validation_predictions['entry_id'] = self.metadata['validation_ids'][0:len(self.validation_predictions)]
+        self.validation_predictions['scores'] = 'validation_scores'
+
+        self.metadata['validation_ids'] = self.metadata['validation_ids'][0:len(self.validation_predictions)]
 
         self.all_scores = pd.concat([self.predictions, self.train_predictions, self.validation_predictions],
                                     ignore_index=True)
         self.market_cap_to_share_price()
-        self.generate_buy_sell_signals()
+        self.save_model_scores()
 
     def market_cap_to_share_price(self):
         self.resolve_symbols()
@@ -172,13 +204,33 @@ class ModelBase:
             tmp.append(tmp_df)
         self.all_scores = pd.concat(tmp, ignore_index=True).sort_values(by=['symbol'])
 
-    def generate_buy_sell_signals(self):
-        q = QUERIES['fetch_latest_prices']
-        self.current_prices = pd.read_sql(q, con=POSTGRES_URL)
-        self.all_scores = self.all_scores.merge(self.current_prices, on='symbol')
-        self.all_scores['percent_diff'] = ((self.all_scores['close'] - self.all_scores['current_close']) /
-                                           self.all_scores['current_close']) * 100
-        self.all_scores.sort_values(by=['percent_diff', 'symbol'], inplace=True)
+    def save_model_scores(self):
+        """Updates metadata to include training, validation, and prediction results by
+        calling model.predict on the training, validation and prediction data. We will store
+        this in db and look back on the results to gauge accuracy"""
+        # need model predictions and actual series values
+        tmp = {}
+        scores = ('train_scores', 'validation_scores', 'test_scores')
+        self.metadata['model_type'] = self.model_type
+        for score in scores:
+            for symbol in self.all_scores['symbol'].unique():
+                score_df = \
+                self.all_scores.loc[(self.all_scores['scores'] == score) & (self.all_scores['symbol'] == symbol)][
+                    ['date', 'close']]
+                tmp[symbol] = {str(date): prediction for date, prediction in
+                               dict(zip(score_df['date'], score_df['close'])).items()}
+            tmp = json.dumps(tmp)
+            self.metadata[score] = tmp
+            tmp = {}
+        conn = psycopg2.connect(POSTGRES_URL)
+        cursor = conn.cursor()
+        columns = self.metadata.keys()
+        values = [self.metadata[column] for column in columns]
+        insert_statement = 'insert into market.models (%s) values %s'
+        cursor.execute(insert_statement, (AsIs(','.join(columns)), tuple(values)))
+        conn.commit()
+        cursor.close()
+        conn.close()
 
 
 class SectorModel(ModelBase):
