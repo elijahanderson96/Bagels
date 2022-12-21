@@ -68,6 +68,7 @@ class Iex:
             url += f'*/{stock}'
         elif time_series_id and not stock:
             url += f'{time_series_id}'
+        print(url)
         r = requests.get(url, params={'token': os.getenv("PRODUCTION_TOKEN")})
         return self.json_to_dataframe(r)
 
@@ -134,7 +135,8 @@ class Pipeline(Iex):
         function to call when we invoke the update_data method."""
         df = pd.DataFrame()
 
-        if records_to_pull == 0: return logger.info(f'Records for {symbol} within {endpoint_name} are up to date.')
+        if records_to_pull == 0:
+            return logger.info(f'Records for {symbol} within {endpoint_name} are up to date.')
         if endpoint_name == 'FUNDAMENTAL_VALUATIONS':
             df = self.fundamental_valuations(symbol, records_to_pull)
         if endpoint_name == 'CASH_FLOW':
