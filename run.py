@@ -4,7 +4,7 @@ from traceback import print_exc
 from config.common import *
 from data.iex import Pipeline
 from data.labels import Prices
-from models import models
+from models.models import PredictionPipeline
 
 today = date.today()
 # Month abbreviation, day and year
@@ -18,9 +18,9 @@ if __name__ == '__main__':
     prices = Prices()
     #prices.update_db()
     symbols = pd.Series([symbol for symbol in SYMBOLS if symbol not in EXCLUDE_LIST])
-    model = models.SectorModel(sector=symbols, model_type='random_forest')
-    model.train(validate=False, interpolate_data=False, interpolate_labels=False)
-    model.predict()
+    model = PredictionPipeline(symbols=symbols, model_type='classify', validate=True)
+    model.train()
+    #model.predict()
     #for company_size, symbols in sym_mkcap_mappings.items():
     #    symbols = [symbol for symbol in symbols if symbol not in EXCLUDE_LIST]
     #    try:

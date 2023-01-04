@@ -105,6 +105,8 @@ class FeaturePrepper:
 
 
     def transform_macro_data(self, macro_data: list):
+        """Sometimes we can't join a quarterly report on data that comes out weekly so
+        we will linearize and approximate to allow for join across all dates"""
         dfs = []
         for df in macro_data:
             df['date'] = df['date'].astype('datetime64[ns]')
