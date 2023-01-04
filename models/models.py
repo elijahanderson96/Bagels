@@ -25,25 +25,16 @@ class ModelBase:
         self.train_data = None
         self.validation_data = None
         self.test_data = None
+
         self.train_dates = None
         self.validation_dates = None
         self.test_dates = None
+
         self.model = None
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
-        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                               verbose=5,
-                                                               mode='min',
-                                                               patience=20,
-                                                               restore_best_weights=True)
         self.model_size = None  # in gb
-        self.columns = None
-        self.scaler = MinMaxScaler()
-        self.predictions = None
+
         self.trained = False
-        self.validate = False
-        self.symbols = None
-        self.model_version = str(datetime.now()).replace(' ', '_')
-        self.model_tester_data = []
+        self.predictions = None
         self.history = None
         self.n_features = None
         self.macro_queries = [
@@ -55,13 +46,62 @@ class ModelBase:
             'fetch_30Ymortgage_rates',
         ]
 
-    def create_deep_neural_net_model(self):
+        def create_features(self):
+            """Features between regression and classification should be the same. The only
+            difference are labels."""
+            q = QUERIES['fundamental_valuations'].replace('SYMBOLS', f"{str(tuple(self.sector))}")
+            self.fundamental_valuation_data = pd.read_sql(q, con=POSTGRES_URL)
+
+            macro_data = self.fetch_macro_data()
+
+            for df in macro_data:
+                self.fundamental_valuation_data = self.fundamental_valuation_data.merge(df, on='date', how='left')
+
+            self.fundamental_valuation_data.drop_duplicates(inplace=True, subset=['date', 'symbol'])
+            self.fundamental_valuation_data.replace(np.nan, 0, inplace=True)
+
+
+class ClassificationModel(ModelBase):
+    """Used to classify stocks to two possible taxonomies: Buy or Sell."""
+
+    def __init__(self):
+        super().__init__()
+
+    def create_model(self):
+        self.model = tfdf.keras.GradientBoostedTreesModel()
+
+    def create_labels(self):
+        pass
+
+    def train(self):
+        tf_train_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.train_data, label="buy_sell")
+        tf_valid_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.validation_data, label="buy_sell") \
+            if self.validate else None
+        self.model.fit(tf_train_dataset, validation_data=tf_valid_dataset)
+        self.model.summary()
+        return self
+
+
+class RegressionModel(ModelBase):
+    """Used to try to predict a stock prices exact (continuous) value."""
+
+    def __init__(self):
+        super().__init__()
+        self.scaler = MinMaxScaler()
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+        self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                               verbose=5,
+                                                               mode='min',
+                                                               patience=20,
+                                                               restore_best_weights=True)
+
+    def create_model(self):
         self.model = tf.keras.models.Sequential([
             tf.keras.layers.Dense(self.n_features / 1.1, input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(int(self.n_features / 1.5), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
-            tf.keras.layers.Dense(int(self.n_features/ 1.75), input_shape=(None, self.train_data.shape[1] - 3),
+            tf.keras.layers.Dense(int(self.n_features / 1.75), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
@@ -75,7 +115,10 @@ class ModelBase:
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(1, activation=tf.keras.layers.LeakyReLU(alpha=0.01))])
 
-    def normalize_train(self):
+    def create_labels(self):
+        pass
+
+    def normalize_training_data(self):
         self.train_dates = self.train_data.pop('date').to_list()
         self.metadata = {col: df.pop('entry_id').to_list() if isinstance(df, pd.DataFrame)
                                                               and not df.empty else None
@@ -85,77 +128,57 @@ class ModelBase:
         self.columns = self.train_data.columns.to_list()
         self.train_data = self.scaler.fit_transform(self.train_data)
 
-    def normalize_validation(self):
+    def normalize_validation_data(self):
         self.validation_dates = self.validation_data.pop('date').to_list()
         self.validation_data = self.scaler.transform(self.validation_data)
 
-    def normalize_test(self):
+    def normalize_test_data(self):
         self.test_dates = self.test_data.pop('date').to_list()
         self.test_data['marketcap'] = [1] * len(self.test_data)
         self.test_data = self.scaler.transform(self.test_data)
 
-    def batch_train(self, batch_size=4):
+    def batch_training_data(self, batch_size=4):
         self.train_data = tf.data.Dataset.from_tensor_slices((self.train_data[:, :-1], self.train_data[:, -1]))
         self.train_data = self.train_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
-    def batch_validation(self, batch_size=1):
+    def batch_validation_data(self, batch_size=1):
         self.validation_data = tf.data.Dataset.from_tensor_slices(
             (self.validation_data[:, :-1], self.validation_data[:, -1]))
         self.validation_data = self.validation_data.batch(batch_size, drop_remainder=True).batch(1, drop_remainder=True)
 
-    def batch_test(self):
+    def batch_test_data(self):
         self.test_data = tf.data.Dataset.from_tensor_slices(self.test_data[:, :-1])
         self.test_data = self.test_data.batch(1, drop_remainder=True).batch(1, drop_remainder=True)
 
-    def train(self, classify=False, boosted_trees=True, neural_net=False):
-        if neural_net:
-            self.create_deep_neural_net_model()
-            self.normalize_train()
-            if self.validate: self.normalize_validation()
-            self.batch_train()
-            if self.validate: self.batch_validation()
-            self.model.compile(optimizer=self.optimizer, loss='mse')
-        if boosted_trees:
-            print(self.train_data)
-            tf_train_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.train_data, label="buy_sell")
-            if self.validate:
-                tf_valid_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.validation_data, label="buy_sell")
-            else:
-                tf_valid_dataset = None
-            self.model = tfdf.keras.GradientBoostedTreesModel()
-            self.model.fit(tf_train_dataset, validation_data=tf_valid_dataset)
+    def train(self):
+        self.create_model()
+        self.normalize_training_data()
+        self.batch_training_data()
 
-        self.model.summary()
-        #with tf.device('/device:GPU:0'):
-        #    self.history = self.model.fit(self.train_data, validation_data=self.validation_data, verbose=2,
-        #                                  epochs=10000,
-        #                                  callbacks=self.early_stopping)
+        if self.validate:
+            self.normalize_validation_data()
+            self.batch_validation_data()
+
+        self.model.compile(optimizer=self.optimizer, loss='mse')
+
+        with tf.device('/device:GPU:0'):
+            self.history = self.model.fit(self.train_data,
+                                          validation_data=self.validation_data,
+                                          verbose=2,
+                                          epochs=10000,
+                                          callbacks=self.early_stopping)
+
         self.trained = True
-        #self.metadata['date_created'] = datetime.now()
-        #if self.validate:
-        ##    val_loss = min(self.history.history['val_loss'])
-        #    index = self.history.history['val_loss'].index(val_loss)
-        #training_loss = self.history.history['loss'][index]
-        #self.metadata['val_loss'] = val_loss
-        #self.metadata['loss'] = training_loss
-        return self
+        self.metadata['date_created'] = datetime.now()
 
-    def predict(self):
-        assert self.trained, 'Must train model before attempting prediction'
-        self.normalize_test()
-        self.batch_test()
-        self.predictions = np.squeeze(self.model.predict(self.test_data))
-        self.train_predictions = np.squeeze(self.model.predict(self.train_data))
-        self.valid_predictions = np.squeeze(self.model.predict(self.validation_data))
-        self.post_process()
+        if self.validate:
+            val_loss = min(self.history.history['val_loss'])
+            index = self.history.history['val_loss'].index(val_loss)
 
-        return self
+        training_loss = self.history.history['loss'][index]
 
-    def save(self):
-        self.model.save(f'./saved_models/model_{self.model_version}')
-
-    def load(self, path_to_file):
-        self.model = tf.keras.models.load_model(path_to_file)
+        self.metadata['val_loss'] = val_loss
+        self.metadata['loss'] = training_loss
 
     def post_process(self):
         prediction_data = pd.DataFrame(list(self.test_data.unbatch().unbatch().as_numpy_iterator()),
@@ -203,6 +226,7 @@ class ModelBase:
                                                   f"{str(tuple(self.sector)) if len(self.sector) > 1 else str(tuple(self.sector)).replace(',)', ')')}")
         shares = pd.read_sql(q, con=POSTGRES_URL)
         tmp = []
+
         for symbol in symbols:
             n_shares = shares.loc[shares['symbol'] == symbol]['so'].unique().tolist()[0]
             tmp_df = self.all_scores.loc[self.all_scores['symbol'] == symbol].copy()
@@ -249,41 +273,20 @@ class ModelBase:
         conn.close()
 
 
-class SectorModel(ModelBase):
-    """Sector Model is used when building models for multiple symbols."""
-
-    def __init__(self, sector, model_type):
+class PredictionPipeline:
+    def __init__(self, symbols, model_type='', validate=False):
+        assert model_type.lower() in ('classify', 'regression')
         super().__init__()
-        self.sector = sector
-        self.model_type = model_type
-        self.sector_string = ", ".join(self.sector)
-        self.fundamental_valuation_data = None
-        self.validate = False
-        self.interpolate_data = False
-        self.interpolate_labels = False
-
-    def train(self, validate=False, interpolate_data=False, interpolate_labels=False, neural_net=False):
-        """
-        Train the model.
-        Args:
-            validate: Whether to hold out a single data point (the latest quarterly report) to validate against
-            interpolate_data: Whether we want to linearly interpolate data between quarterly report dates
-            interpolate_labels: Whether we want to linearly interpolate labels between quarterly report dates,
-            or use the actual closing prices.
-
-        Returns:
-            self
-        """
+        self.symbols = symbols
         self.validate = validate
-        self.interpolate_data = interpolate_data
-        self.interpolate_labels = interpolate_labels
-        self.neural_net = neural_net
-        self.gen_feature_matrix()
-        return super().train()
+        self.model = ClassificationModel(symbols, validate) if model_type.lower() == 'classify' else \
+            RegressionModel(symbols, validate)
+
+    def train(self):
+        return self.model.train()
 
     def predict(self):
-        pass
-        #super().predict()
+        return self.model.predict()
 
     def gen_feature_matrix(self):
         self.fetch_data()
@@ -355,36 +358,33 @@ class SectorModel(ModelBase):
                 self.validation_data[col] = 0
         self.validation_data = self.validation_data[self.columns]
 
-    def assign_labels(self):
+    def assign_labels(self, neural_net=False, random_forest=False):
         logger.info(f'Assigning labels to the dataset')
         q = QUERIES['labels'].replace('SYMBOLS',
                                       f"{str(tuple(self.sector)) if len(self.sector) > 1 else str(tuple(self.sector)).replace(',)', ')')}")
         labels = pd.read_sql(q, con=POSTGRES_URL)
         self.train_data = self.train_data.merge(labels, on=['date', 'symbol'])
-        labels.rename(columns={'marketcap': 'marketcap_prev', 'date':'date_prev'}, inplace=True)
-        self.train_data['date_prev'] = self.train_data['date_prev'].astype('datetime64[ns]')
-        self.train_data = self.train_data.merge(labels, on=['date_prev', 'symbol'])
-        self.train_data['buy_sell'] = self.train_data['marketcap'] - self.train_data['marketcap_prev']
-        self.train_data['buy_sell'] = self.train_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
-        self.train_data.drop(axis=1, inplace=True, labels=['marketcap','marketcap_prev','entry_id','date','date_prev'])
-        logger.info(f'Training data is now of shape {self.train_data.shape} for {self.sector_string}')
-        if self.validate:
-            labels.rename(columns={'marketcap_prev': 'marketcap', 'date_prev': 'date'}, inplace=True)
-            self.validation_data = self.validation_data.merge(labels, on=['date', 'symbol'])
-            labels.rename(columns={'marketcap': 'marketcap_prev', 'date': 'date_prev'}, inplace=True)
-            self.validation_data['date_prev'] = self.validation_data['date_prev'].astype('datetime64[ns]')
-            self.validation_data = self.validation_data.merge(labels, on=['date_prev', 'symbol'])
-            print(self.validation_data)
-            self.validation_data['buy_sell'] = self.validation_data['marketcap'] - self.validation_data['marketcap_prev']
-            self.validation_data['buy_sell'] = self.validation_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
-            self.validation_data.drop(axis=1, inplace=True,labels=['marketcap', 'marketcap_prev', 'entry_id', 'date', 'date_prev'])
 
+        if random_forest:
+            labels.rename(columns={'marketcap': 'marketcap_prev', 'date': 'date_prev'}, inplace=True)
+            self.train_data['date_prev'] = self.train_data['date_prev'].astype('datetime64[ns]')
+            self.train_data = self.train_data.merge(labels, on=['date_prev', 'symbol'])
+            self.train_data['buy_sell'] = self.train_data['marketcap'] - self.train_data['marketcap_prev']
+            self.train_data['buy_sell'] = self.train_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
+            self.train_data.drop(axis=1, inplace=True,
+                                 labels=['marketcap', 'marketcap_prev', 'entry_id', 'date', 'date_prev'])
+
+        logger.info(f'Training data is now of shape {self.train_data.shape} for {self.sector_string}')
+
+        if self.validate and neural_net:
+            self.validation_data = self.validation_data.merge(labels, on=['date', 'symbol'])
             logger.info(f'Validation data is of shape {self.validation_data.shape}')
-        self.train_data = self.train_data[
-            [col for col in self.train_data.columns if col != 'marketcap']]
-        if self.validate:
             self.validation_data = self.validation_data[
-            [col for col in self.validation_data.columns if col != 'marketcap']]
+                [col for col in self.validation_data.columns if col != 'marketcap']]
+
+        if neural_net:
+            self.train_data = self.train_data[
+                [col for col in self.train_data.columns if col != 'marketcap']]
 
     def train_test_split(self):
         """Splits the dataset into training and test based on the current date. Since we are
