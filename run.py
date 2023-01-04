@@ -9,17 +9,16 @@ from models import models
 today = date.today()
 # Month abbreviation, day and year
 today = today.strftime("%b_%d_%Y")
-
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
     DataGetter = Pipeline()
-    DataGetter.update_data()
+    #DataGetter.update_data()
     prices = Prices()
-    prices.update_db()
+    #prices.update_db()
     symbols = pd.Series([symbol for symbol in SYMBOLS if symbol not in EXCLUDE_LIST])
-    model = models.SectorModel(sector=symbols, model_type='RANDOM')
+    model = models.SectorModel(sector=symbols, model_type='random_forest')
     model.train(validate=False, interpolate_data=False, interpolate_labels=False)
     model.predict()
     #for company_size, symbols in sym_mkcap_mappings.items():

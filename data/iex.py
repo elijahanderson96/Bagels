@@ -166,7 +166,8 @@ class Pipeline(Iex):
                 for key, count in keys_and_counts.items():
                     sleep(.1)
                     current_records = self.examine_current_records(endpoint_name, key)
-                    records_to_pull = count - current_records
+                    #records_to_pull = count - current_records
+                    records_to_pull = 100
                     try:
                         self.ping_endpoint(endpoint_name, key, records_to_pull)
                     except:
