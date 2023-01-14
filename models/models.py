@@ -3,27 +3,24 @@ import logging
 from datetime import datetime
 
 import numpy as np
-import pandas as pd
+import psycopg2
 import tensorflow as tf
 import tensorflow_decision_forests as tfdf
+from psycopg2.extensions import AsIs
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
-from config.common import QUERIES
-from config.configs import *
 from data.transforms import FeaturePrepper
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-import psycopg2
-from psycopg2.extensions import AsIs
-
 
 class ModelBase:
-    def __init__(self, stocks: list, validate: bool):
+    def __init__(self, stocks: list, validate: bool, features: list):
         self.stocks = stocks
         self.validate = validate
+        self.features = features
 
         self.train_data = None
         self.validation_data = None
@@ -40,45 +37,30 @@ class ModelBase:
         self.predictions = None
         self.history = None
         self.n_features = None
-        self.macro_queries = [
-            'fetch_15Ymortgage_rates',
-            'fetch_5Ymortgage_rates',
-            'fetch_30Ymortgage_rates',
-        ]
-
-    def _fetch_macro_data(self):
-        logger.info(f'Fetching macro economic data from database.')
-        macro_dataframes = [pd.read_sql(QUERIES[q], con=POSTGRES_URL) for q in self.macro_queries]
-        prepper = FeaturePrepper()
-        macro_dataframes = prepper.transform_macro_data(macro_dataframes)
-        return macro_dataframes
 
     def _create_features(self):
-        """Features between regression and classification should be the same. The only
-        difference are labels (market_cap (continuous) vs buy_or_sell (1 or 0)."""
-        query = QUERIES['fundamental_valuations'].replace('SYMBOLS', f"{str(tuple(self.stocks))}")
-        self.fundamental_valuation_data = pd.read_sql(query, con=POSTGRES_URL, parse_dates=['date', 'date_prev'])
+        """Pass a dict of datasets that we will join together by date
+        to form a feature matrix.
 
-        macro_data = self._fetch_macro_data()
+        Args:
+            datasets: dict of datasets with key being query name, value being any
+            query parameters. Example {'fundamental_valudations': {'symbol'
 
-        for df in macro_data:
-            self.fundamental_valuation_data = self.fundamental_valuation_data.merge(df, on='date', how='left')
-
-        self.fundamental_valuation_data.drop_duplicates(inplace=True, subset=['date', 'symbol'])
+        """
+        feature_generator = FeaturePrepper(self.features, {'SYMBOLS': str(tuple(self.stocks))})
+        self.data = feature_generator.create_feature_matrix()
+        self.n_features = self.data.shape[1]
 
     def _train_test_split(self):
         """Splits the dataset into training and test based on the current date. Since we are
         predicting prices for future dates, the train dataset is simply all data up to the current date."""
         logger.info(f'Splitting into train and test sets')
 
-        self.train_data = self.fundamental_valuation_data.loc[
-            self.fundamental_valuation_data['date'] < datetime.now()].sort_values(by=['symbol'])
+        self.train_data = self.data.loc[
+            self.data['date'] < datetime.now()].sort_values(by=['symbol'])
 
-        self.test_data = self.fundamental_valuation_data.loc[
-            self.fundamental_valuation_data['date'] >= datetime.now()].sort_values(by=['symbol'])
-
-        #  subset the train data such that we only take symbols that are also in the test data
-        self.train_data = self.train_data.loc[self.train_data['symbol'].isin(self.test_data['symbol'])]
+        self.test_data = self.data.loc[
+            self.data['date'] >= datetime.now()].sort_values(by=['symbol'])
 
         #  take the max date of each symbol as prediction/test data.
         mask = self.test_data.groupby('symbol')['date'].transform(max) == self.test_data['date']
@@ -114,15 +96,35 @@ class ModelBase:
         """Instantiated in child classes"""
         pass
 
+    def _create_model(self):
+        # instantiated in child class
+        pass
+
 
 class ClassificationModel(ModelBase):
     """Used to classify stocks to two possible taxonomies: Buy or Sell."""
 
-    def __init__(self, stocks: list, validate=False):
-        super().__init__(stocks, validate)
+    def __init__(self, stocks: list, validate=False, features=None):
+        super().__init__(stocks, validate, features)
 
     def _create_model(self):
-        self.model = tfdf.keras.GradientBoostedTreesModel(max_depth=6)
+        tuner = tfdf.tuner.RandomSearch(num_trials=100)
+        tuner.choice("min_examples", [2, 5, 7, 10])
+        tuner.choice("categorical_algorithm", ["CART", "RANDOM"])
+        local_search_space = tuner.choice("growing_strategy", ["LOCAL"])
+        local_search_space.choice("max_depth", [3, 4, 5, 6, 8])
+        global_search_space = tuner.choice("growing_strategy", ["BEST_FIRST_GLOBAL"], merge=True)
+        global_search_space.choice("max_num_nodes", [16, 32, 64, 128, 256])
+        tuner.choice("shrinkage", [0.02, 0.05, 0.10, 0.15])
+        tuner.choice("num_candidate_attributes_ratio", [0.2, 0.5, 0.9, 1.0])
+        tuner.choice("split_axis", ["AXIS_ALIGNED"])
+        oblique_space = tuner.choice("split_axis", ["SPARSE_OBLIQUE"], merge=True)
+        oblique_space.choice("sparse_oblique_normalization",
+                             ["NONE", "STANDARD_DEVIATION", "MIN_MAX"])
+        oblique_space.choice("sparse_oblique_weights", ["BINARY", "CONTINUOUS"])
+        oblique_space.choice("sparse_oblique_num_projections_exponent", [1.0, 1.5])
+
+        self.model = tfdf.keras.GradientBoostedTreesModel(tuner=tuner)
 
     def _create_labels(self):
         """Generate 1 or 0 based on whether the stock price is
@@ -130,44 +132,30 @@ class ClassificationModel(ModelBase):
 
         query = QUERIES['labels'].replace('SYMBOLS', f"{str(tuple(self.stocks))}")
         labels = pd.read_sql(query, con=POSTGRES_URL, parse_dates=['date'])
+        self.train_data['date_prev'] = self.train_data['date_prev'].astype('datetime64[ns]')
 
         self.train_data = self.train_data.merge(labels, on=['date', 'symbol'])
-
-        labels.rename(columns={'marketcap': 'marketcap_prev',
-                               'date': 'date_prev'}, inplace=True)
-
+        labels.rename(columns={'marketcap': 'marketcap_prev', 'date': 'date_prev'}, inplace=True)
         self.train_data = self.train_data.merge(labels, on=['date_prev', 'symbol'])
 
         self.train_data['buy_sell'] = self.train_data['marketcap'] - self.train_data['marketcap_prev']
         self.train_data['buy_sell'] = self.train_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
 
-        self.train_data.drop(axis=1, inplace=True,
-                             labels=['marketcap',
-                                     'marketcap_prev',
-                                     'entry_id',
-                                     'date',
-                                     'date_prev'])
+        to_drop = ['marketcap', 'marketcap_prev', 'entry_id', 'date', 'date_prev']
+        self.train_data.drop(axis=1, inplace=True, labels=to_drop)
 
         if self.validate:
-            labels.rename(columns={'marketcap_prev': 'marketcap',
-                                   'date_prev': 'date'}, inplace=True)
-
+            self.validation_data['date_prev'] = self.validation_data['date_prev'].astype('datetime64[ns]')
+            labels.rename(columns={'marketcap_prev': 'marketcap', 'date_prev': 'date'}, inplace=True)
             self.validation_data = self.validation_data.merge(labels, on=['date', 'symbol'])
-
-            labels.rename(columns={'marketcap': 'marketcap_prev',
-                                   'date': 'date_prev'}, inplace=True)
+            labels.rename(columns={'marketcap': 'marketcap_prev', 'date': 'date_prev'}, inplace=True)
 
             self.validation_data = self.validation_data.merge(labels, on=['date_prev', 'symbol'])
             self.validation_data['buy_sell'] = self.validation_data['marketcap'] - self.validation_data[
                 'marketcap_prev']
             self.validation_data['buy_sell'] = self.validation_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
 
-            self.validation_data.drop(axis=1, inplace=True,
-                                      labels=['marketcap',
-                                              'marketcap_prev',
-                                              'entry_id',
-                                              'date',
-                                              'date_prev'])
+            self.validation_data.drop(axis=1, inplace=True, labels=to_drop)
 
     def train(self):
         self._create_datasets()
@@ -175,8 +163,9 @@ class ClassificationModel(ModelBase):
         tf_train_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.train_data, label="buy_sell")
         tf_valid_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(self.validation_data,
                                                                  label="buy_sell") if self.validate else None
-
         self.model.fit(tf_train_dataset, validation_data=tf_valid_dataset)
+        tuning_logs = self.model.make_inspector().tuning_logs()
+        tuning_logs.head()
         self.model.summary()
 
         self.trained = True
@@ -184,14 +173,19 @@ class ClassificationModel(ModelBase):
         return self
 
     def predict(self):
-        pass
+        to_drop = ['entry_id', 'date', 'date_prev']
+        test_data = self.test_data.drop(axis=1, labels=to_drop)
+        tf_test_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(test_data)
+        self.test_data['predictions'] = self.model.predict(tf_test_dataset)
+        return self.test_data[['symbol', 'predictions']].sort_values(by='predictions')
 
 
 class RegressionModel(ModelBase):
     """Used to try to predict a stock prices exact (continuous) value."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, stocks: list, validate: bool):
+        super().__init__(stocks, validate)
+
         self.scaler = MinMaxScaler()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
         self.early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
@@ -200,9 +194,9 @@ class RegressionModel(ModelBase):
                                                                patience=20,
                                                                restore_best_weights=True)
 
-    def create_model(self):
+    def _create_model(self):
         self.model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(self.n_features / 1.1, input_shape=(None, self.train_data.shape[1] - 3),
+            tf.keras.layers.Dense(self.n_features / 1.25, input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(int(self.n_features / 1.5), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
@@ -210,13 +204,9 @@ class RegressionModel(ModelBase):
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
-            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
+            tf.keras.layers.Dense(int(self.n_features / 2.25), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
-            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
-                                  activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
-            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
-                                  activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
-            tf.keras.layers.Dense(int(self.n_features / 2), input_shape=(None, self.train_data.shape[1] - 3),
+            tf.keras.layers.Dense(int(self.n_features / 2.5), input_shape=(None, self.train_data.shape[1] - 3),
                                   activation=tf.keras.layers.LeakyReLU(alpha=0.01)),
             tf.keras.layers.Dense(1, activation=tf.keras.layers.LeakyReLU(alpha=0.01))])
 
@@ -225,7 +215,7 @@ class RegressionModel(ModelBase):
         self.train_test_split()
         if self.validate: self.train_validation_split()
         self.transform_data()
-        if self.neural_net: self.one_hot_encode()
+        if self.neural_net: self._one_hot_encode()
         self.n_features = self.train_data.shape[1]
 
     def transform_data(self):
@@ -244,9 +234,9 @@ class RegressionModel(ModelBase):
         if not self.interpolate_data and not self.interpolate_labels:
             self.assign_labels()
 
-        return self.fundamental_valuation_data
+        return self.data
 
-    def one_hot_encode(self):
+    def _one_hot_encode(self):
         """This function will one hot encode the symbol column"""
         self.columns = [col for col in self.train_data.columns if col not in ('marketcap', 'symbol')]
         self.columns += self.sector + ['marketcap']
@@ -436,12 +426,12 @@ class RegressionModel(ModelBase):
 
 
 class PredictionPipeline:
-    def __init__(self, symbols, model_type='', validate=False):
+    def __init__(self, symbols, model_type='', validate=False, features=None):
         assert model_type.lower() in ('classify', 'regression')
         self.symbols = symbols
         self.validate = validate
-        self.model = ClassificationModel(symbols, validate) if model_type.lower() == 'classify' else \
-            RegressionModel(symbols, validate)
+        self.model = ClassificationModel(symbols, validate, features) if model_type.lower() == 'classify' else \
+            RegressionModel(symbols, validate, features)
 
     def train(self):
         return self.model.train()
@@ -450,4 +440,23 @@ class PredictionPipeline:
         return self.model.predict()
 
 
-self = ClassificationModel(['BAC', 'C'])
+from config.common import *
+
+self = ClassificationModel(SMALLEST_CAP_SYMBOLS, validate=True, features=['fundamental_valuations',
+                                                                          'fetch_5Ymortgage_rates',
+                                                                          'fetch_15Ymortgage_rates',
+                                                                          'fetch_30Ymortgage_rates',
+                                                                          'fetch_recession_probability',
+                                                                          'fetch_num_total_employees',
+                                                                          'fetch_housing_starts',
+                                                                          'fetch_industrial_production',
+                                                                          'fetch_unemployment_rate',
+                                                                          'fetch_vehicle_sales',
+                                                                          'fetch_cpi',
+                                                                          'fetch_unemployment_claims',
+                                                                          'fetch_comm_paper_outstanding',
+                                                                          'fetch_fed_funds',
+                                                                          'fetch_real_gdp'])
+self.train()
+predictions = self.predict()
+print(predictions)

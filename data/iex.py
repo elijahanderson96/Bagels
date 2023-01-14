@@ -130,6 +130,12 @@ class Pipeline(Iex):
         r = requests.get(url, params={'token': self.token, 'last': last})
         return self.json_to_dataframe(r)
 
+    def fx_rates(self, symbol, last=1):
+        logger.info(f'Grabbing last {last} treasury reports for {symbol}')
+        url = self.url + f'FX/{symbol}'
+        logger.info(f'Pinging {url} for treasury data')
+        r = requests.get(url, params={'token': self.token, 'last': last})
+
     def ping_endpoint(self, endpoint_name, symbol, records_to_pull=0):
         """This is a rather crude but effective way of implementing which
         function to call when we invoke the update_data method."""
@@ -147,8 +153,11 @@ class Pipeline(Iex):
             df = self.mortgage(symbol, records_to_pull)
         if endpoint_name == 'ECONOMIC':
             df = self.economic(symbol, records_to_pull)
+
         try:
+            df['date'] = df['date'].astype('datetime64[ns]') if endpoint_name != 'FUNDAMENTAL_VALUATIONS' else None
             df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='market')
+
         except Exception:
             print_exc()
             logger.warning(f'Could not insert data for {symbol} within {endpoint_name}.')
@@ -166,8 +175,11 @@ class Pipeline(Iex):
                 for key, count in keys_and_counts.items():
                     sleep(.1)
                     current_records = self.examine_current_records(endpoint_name, key)
-                    #records_to_pull = count - current_records
-                    records_to_pull = 100
+                    records_to_pull = count - current_records
+
+                    if records_to_pull < 0:  # indicates discontinued stock/endpoints
+                        continue
+
                     try:
                         self.ping_endpoint(endpoint_name, key, records_to_pull)
                     except:

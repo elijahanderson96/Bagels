@@ -1,5 +1,4 @@
 from datetime import date
-from traceback import print_exc
 
 from config.common import *
 from data.iex import Pipeline
@@ -14,21 +13,28 @@ logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
     DataGetter = Pipeline()
-    #DataGetter.update_data()
+    DataGetter.update_data()
     prices = Prices()
-    #prices.update_db()
+    prices.update_db()
     symbols = pd.Series([symbol for symbol in SYMBOLS if symbol not in EXCLUDE_LIST])
-    model = PredictionPipeline(symbols=symbols, model_type='classify', validate=True)
+    model = PredictionPipeline(symbols=symbols,
+                               model_type='classify',
+                               validate=True,
+                               features=['fundamental_valuations',
+                                         'fetch_5Ymortgage_rates',
+                                         'fetch_15Ymortgage_rates',
+                                         'fetch_30Ymortgage_rates',
+                                         'fetch_recession_probability',
+                                         'fetch_num_total_employees',
+                                         'fetch_housing_starts',
+                                         'fetch_industrial_production',
+                                         'fetch_unemployment_rate',
+                                         'fetch_vehicle_sales',
+                                         'fetch_cpi',
+                                         'fetch_unemployment_claims',
+                                         'fetch_comm_paper_outstanding',
+                                         'fetch_fed_funds',
+                                         'fetch_real_gdp'])
     model.train()
-    #model.predict()
-    #for company_size, symbols in sym_mkcap_mappings.items():
-    #    symbols = [symbol for symbol in symbols if symbol not in EXCLUDE_LIST]
-    #    try:
-    #        model = models.SectorModel(sector=symbols, model_type=company_size)
-    #        model.train(validate=False, interpolate_data=False, interpolate_labels=False)
-    #        model.predict()
-    #        input('break')
-            #model.save()
-    #    except:
-    #        print(print_exc())
-    #        print(f'Likely missing test data or labels')
+    prediction_scores = model.predict()
+    print(prediction_scores)
