@@ -1,47 +1,77 @@
+import datetime
 import logging
+
 import pandas as pd
-from datetime import timedelta
-from multiprocessing import Pool, cpu_count
+
+from config.common import POSTGRES_URL, QUERIES
+
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
 class FeaturePrepper:
-    """Takes data from any endpoint and transform it. We impute row data such that
-    any zeros are replaced by the average value of the row, and interpolate the data such
-    that there's data for every day. It is a linear interpolation."""
+    def __init__(self, datasets: list, params: dict):
+        self.datasets = datasets
+        self.params = params
+        self.data = None
 
-    def __init__(self):
-        self.data = None # fundamentals data
-        self.macro_data = None
-        self.chunked_data = None
-        self.labeled_data = None
-        self.symbols = None
-        self.report_dates = None
+    def _fetch_raw_data(self):
+        """Fetch the raw data from db and map it."""
+        #  fetch the un-parameterized queries from the dict of sql queries
+        queries = {q: QUERIES[q] for q in self.datasets}
+
+        #  parameterize the queries (all we do is string substitution)
+        for placeholder, parameter in self.params.items():
+            queries = {k: q.replace(placeholder, parameter) for k, q in queries.items()}
+
+        #  return appropriate data
+        return {q_name: pd.read_sql(q_value, con=POSTGRES_URL) for q_name, q_value in queries.items()}
+
+    def _join_datasets(self, left='fundamental_valuations', max_date='right'):
+        """Join datasets based on date. Ensure that in our sql queries, every date column we're joining on
+        is aliased as "SELECT date_column as date" otherwise this will fail.
+
+        Args:
+            left: The dataframe that will start the join as the left most df.
+             Pass a string indicating which dataset should be the root join df.
+
+        Returns:
+            data (df): dataframe containing all features joined together by date.
+
+        """
+        logger.info(f'Forming full dataset with all features. The {left} dataframe will '
+                    f'be used as a starting point, all other dataframes will be joined to it. '
+                    f'The feature matrix will contain the following {", ".join(self.datasets)}')
+
+        self.raw_data = self._fetch_raw_data()
+        left_join_df = self.raw_data[left]
+        logger.info(f'Starting data is of shape {left_join_df.shape}.')
+
+        for dataset, contents in self.raw_data.items():
+            if dataset != left:
+                contents = self._transform(contents)
+                if max(contents['date']) <= datetime.datetime.now():
+                        logger.warning(f'{dataset} is not up to date. Consider re-ingesting the data. '
+                                       f'We cannot build models with this feature as it stands.')
+                else:
+                    left_join_df = left_join_df.merge(contents, on='date').drop_duplicates()
+
+        logger.info(f'Final data is of shape {left_join_df.shape}.')
+        return left_join_df
 
     @staticmethod
-    def interpolate(df_chunk):
-        assert df_chunk['symbol'].iloc[0] == df_chunk['symbol'].iloc[1], 'symbols do not match'
+    def _interpolate(df_chunk):
         n_days = abs((df_chunk['date'].iloc[0] - df_chunk['date'].iloc[1]).days)
-        dates = pd.date_range(df_chunk['date'].iloc[0], df_chunk['date'].iloc[1], freq='d')
-        temp_values = {}
-        for col in df_chunk.columns:
-            if col not in ('date', 'symbol'):
-                tmp = []
-                for j in range(n_days + 1):
-                    number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
-                    tmp.append(number)
-                temp_values.update({col: tmp})
-        temp_values.update({'date': dates, 'symbol': df_chunk['symbol'].iloc[0]})
-        return pd.DataFrame(temp_values)
 
-    @staticmethod
-    def interpolate_macro_data(df_chunk):
-        n_days = abs((df_chunk['date'].iloc[0] - df_chunk['date'].iloc[1]).days)
+        if n_days == 1:
+            # date is already 1 day apart for this chunk, so we don't need to do anything.
+            return df_chunk
+
         dates = pd.date_range(df_chunk['date'].iloc[0], df_chunk['date'].iloc[1], freq='d')
         temp_values = {}
+
         for col in df_chunk.columns:
-            if col not in ('date'):
+            if col != 'date':
                 tmp = []
                 for j in range(n_days + 1):
                     number = ((df_chunk[col].iloc[1] - df_chunk[col].iloc[0]) / n_days * j) + df_chunk[col].iloc[0]
@@ -50,73 +80,38 @@ class FeaturePrepper:
         temp_values['date'] = dates
         return pd.DataFrame(temp_values)
 
-    def preprocess(self, interpolate=False):
-        """Sorts the values by symbols (if multiple) and report dates. Pops the report dates (after adding 91 days)
-        and symbols into a class attribute, and returns all numeric data from the original data"""
-        self.data.fillna(0, inplace=True)
-        self.data.sort_values(by=['symbol', 'date'], inplace=True)
-        logger.info('Dropping any duplicate entries based on symbol and report date.')
-        self.data.drop_duplicates(inplace=True, subset=['symbol', 'date'])  # add symbol
-        self.fetch_numeric_data()
-        if not interpolate: return
-        logger.info('Chunking the dataframe to expedite interpolation')
-        self.chunked_data = [self.data.iloc[i:i + 2] for i in range(len(self.data) - 1)
-                                 if self.data['symbol'].iloc[i] == self.data['symbol'].iloc[i + 1]]
+    def _transform(self, df: pd.DataFrame):
+        """Sometimes we can't join data based on date because it might be quarterly, weekly, monthly, etc.
+        This function will linearize all data between two given dates as too approximate values on
+        a daily basis rather than quarterly, weekly, monthly, etc."""
+        df['date'] = df['date'].astype('datetime64[ns]')
+        df.drop_duplicates(subset=['date'], inplace=True)
+        df.sort_values(inplace=True, by='date')
+        chunked_data = [df.iloc[i:i + 2] for i in range(len(df) - 1)]
+        df_interpolated = pd.concat([self._interpolate(chunk) for chunk in chunked_data], ignore_index=True)
+        return df_interpolated
+
+    def create_feature_matrix(self):
+        self.data = self._join_datasets()
         return self.data
 
-    def fetch_numeric_data(self):
-        """Save report dates and symbols, drop non-numeric """
-        report_dates = self.data['date'].to_list()
-        symbols = self.data['symbol'].to_list()
-        self.data = self.data._get_numeric_data()
-        self.data['date'] = report_dates
-        self.data['symbol'] = symbols
 
-    @staticmethod
-    def _impute_row_data(df):
-        df.replace(0, np.nan, inplace=True)
-        m = df.mean(axis=1)
-        for i, col in enumerate(df):
-            df.iloc[:, i] = df.iloc[:, i].fillna(m)
-        return df
+if __name__ == '__main__':
+    self = FeaturePrepper(['fundamental_valuations',
+                           'fetch_5Ymortgage_rates',
+                           'fetch_15Ymortgage_rates',
+                           'fetch_30Ymortgage_rates',
+                           'fetch_recession_probability',
+                           'fetch_num_total_employees',
+                           'fetch_housing_starts',
+                           'fetch_industrial_production',
+                           'fetch_unemployment_rate',
+                           'fetch_vehicle_sales',
+                           'fetch_cpi',
+                           'fetch_unemployment_claims',
+                           'fetch_comm_paper_outstanding',
+                           'fetch_fed_funds',
+                           'fetch_real_gdp'],
+                          params={'SYMBOLS': str(('JPM', 'MS', 'GS'))})
 
-    def transform(self, data, interpolate=False):
-        """
-
-        Args:
-            data: Dataframe to prepare as input for the model.
-            interpolate: Whether to linearize data that is not on a day-to-day basis
-
-        Returns:
-
-        """
-        self.data = data
-        self.preprocess(interpolate=interpolate)
-        if not interpolate:
-            logger.info('Data is NOT being interpolated.')
-            return
-        logger.info(f'Provisioning {cpu_count() - 1} cpus for transformation')
-        with Pool(cpu_count() - 1) as p:
-            dfs = p.map(self.interpolate, self.chunked_data)
-            df = pd.concat(dfs, ignore_index=True)
-            # df = self._impute_row_data(df)
-        logger.info(f'Interpolation for {", ".join(df["symbol"].unique())} complete')
-        return df
-
-
-    def transform_macro_data(self, macro_data: list):
-        """Sometimes we can't join a quarterly report on data that comes out weekly so
-        we will linearize and approximate to allow for join across all dates"""
-        dfs = []
-        for df in macro_data:
-            df['date'] = df['date'].astype('datetime64[ns]')
-            df.drop_duplicates(subset=['date'],inplace=True)
-            df.sort_values(inplace=True,by='date')
-            chunked_data = [df.iloc[i:i + 2] for i in range(len(df) - 1)]
-            df_interpolated = [self.interpolate_macro_data(chunk) for chunk in chunked_data]
-            df_interpolated = pd.concat(df_interpolated, ignore_index=True)
-            df_interpolated['date'] = pd.to_datetime(df_interpolated['date']) + timedelta(days=91)
-            dfs.append(df_interpolated)
-        logger.info(f'Interpolation for macrodata complete')
-        return dfs
-
+    left = 'fundamental_valuations'
