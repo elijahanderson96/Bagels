@@ -44,7 +44,8 @@ SELECT entry_id,
        "filingDate" + INTERVAL '91 days' as date, "filingDate" as date_prev, "goodwillTotal", "incomeNetPerWabsoSplitAdjustedYoyDeltaPercent", "incomeNetPerWadsoSplitAdjusted", "incomeNetPerWadsoSplitAdjustedYoyDeltaPercent", "incomeNetPreTax", "interestBurden", "inventoryTurnover", "investedCapital", "investedCapitalGrowth", "investedCapitalTurnover", leverage, "netDebt", "netIncomeGrowth", "netIncomeToRevenue", "netWorkingCapital", "netWorkingCapitalGrowth", "nibclRevenueDeferredTurnover", nopat, "nopatGrowth", "operatingCashFlowGrowth", "operatingCashFlowInterestCoverage", "operatingCfToRevenue", "operatingReturnOnAssets", "pretaxIncomeMargin", "priceAccountingPeriodEnd", "priceToRevenue", "pToBv", "pToE", "quickRatio", "returnOnAssets", "returnOnEquity", "revenueGrowth", roce, roic, symbol, "taxBurden", "workingCapitalTurnover"
 FROM market.fundamental_valuations
 WHERE symbol in SYMBOLS
-  AND subkey='ttm';
+  AND subkey='ttm'
+;
 
 -- @~shares_outstanding
 SELECT symbol, shares_outstanding as so

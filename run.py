@@ -37,4 +37,4 @@ if __name__ == '__main__':
                                          'fetch_real_gdp'])
     model.train()
     prediction_scores = model.predict()
-    print(prediction_scores)
+
