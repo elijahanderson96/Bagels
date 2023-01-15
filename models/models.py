@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import psycopg2
 import tensorflow as tf
 import tensorflow_decision_forests as tfdf
@@ -10,6 +11,7 @@ from psycopg2.extensions import AsIs
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
+from config.common import POSTGRES_URL, QUERIES
 from data.transforms import FeaturePrepper
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
@@ -108,7 +110,7 @@ class ClassificationModel(ModelBase):
         super().__init__(stocks, validate, features)
 
     def _create_model(self):
-        tuner = tfdf.tuner.RandomSearch(num_trials=100)
+        tuner = tfdf.tuner.RandomSearch(num_trials=1)
         tuner.choice("min_examples", [2, 5, 7, 10])
         tuner.choice("categorical_algorithm", ["CART", "RANDOM"])
         local_search_space = tuner.choice("growing_strategy", ["LOCAL"])
@@ -172,12 +174,33 @@ class ClassificationModel(ModelBase):
 
         return self
 
+    @staticmethod
+    def recommender(prediction_results):
+        #  price to book value between 0 and 4, and prediction value of .5 or greater is what we look to invest in.
+        price_to_bookvalue_and_equity = pd.read_sql(
+            'SELECT symbol, "filingDate" as date, "pToBv", "pToE" FROM market.fundamental_valuations '
+            f'WHERE symbol IN {str(tuple(prediction_results["symbol"].to_list()))} ORDER BY "filingDate" DESC '
+            f'LIMIT {len(prediction_results)}', con=POSTGRES_URL)
+
+        prediction_results = prediction_results.merge(price_to_bookvalue_and_equity, on='symbol').sort_values(
+            by=['predictions', 'pToBv']).drop_duplicates()
+
+        closing_prices = pd.read_sql(f'SELECT symbol, date, close '
+                                     f'FROM market.stock_prices '
+                                     f'WHERE symbol in {str(tuple(prediction_results["symbol"].to_list()))} '
+                                     f'AND date in {str(tuple(prediction_results["date"].astype(str)))}',con=POSTGRES_URL)
+
+        prediction_results = prediction_results.merge(closing_prices, on=['symbol','date'])
+
+
+        return prediction_results
+
     def predict(self):
         to_drop = ['entry_id', 'date', 'date_prev']
         test_data = self.test_data.drop(axis=1, labels=to_drop)
         tf_test_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(test_data)
         self.test_data['predictions'] = self.model.predict(tf_test_dataset)
-        return self.test_data[['symbol', 'predictions']].sort_values(by='predictions')
+        return self.recommender(self.test_data[['symbol', 'predictions']].sort_values(by='predictions'))
 
 
 class RegressionModel(ModelBase):
@@ -418,7 +441,7 @@ class RegressionModel(ModelBase):
         cursor = conn.cursor()
         columns = self.metadata.keys()
         values = [self.metadata[column] for column in columns]
-        insert_statement = 'insert into market.models (%s) values %s'
+        insert_statement = "insert into market.models (%s) values (%s)"
         cursor.execute(insert_statement, (AsIs(','.join(columns)), tuple(values)))
         conn.commit()
         cursor.close()
@@ -440,23 +463,3 @@ class PredictionPipeline:
         return self.model.predict()
 
 
-from config.common import *
-
-self = ClassificationModel(SMALLEST_CAP_SYMBOLS, validate=True, features=['fundamental_valuations',
-                                                                          'fetch_5Ymortgage_rates',
-                                                                          'fetch_15Ymortgage_rates',
-                                                                          'fetch_30Ymortgage_rates',
-                                                                          'fetch_recession_probability',
-                                                                          'fetch_num_total_employees',
-                                                                          'fetch_housing_starts',
-                                                                          'fetch_industrial_production',
-                                                                          'fetch_unemployment_rate',
-                                                                          'fetch_vehicle_sales',
-                                                                          'fetch_cpi',
-                                                                          'fetch_unemployment_claims',
-                                                                          'fetch_comm_paper_outstanding',
-                                                                          'fetch_fed_funds',
-                                                                          'fetch_real_gdp'])
-self.train()
-predictions = self.predict()
-print(predictions)
