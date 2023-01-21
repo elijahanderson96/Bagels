@@ -24,7 +24,6 @@ app.layout = html.Div([
 def display_time_series(ticker):
     q = QUERIES['time_series'].replace('SYMBOL', ticker)
     df = pd.read_sql(q, POSTGRES_URL)
-    print(df.loc[df.duplicated(subset=['date'])])
     fig = px.line(df, x='date', y='close', title=f'{ticker.upper()} Forecast')
     return fig
 
