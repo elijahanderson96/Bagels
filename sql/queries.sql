@@ -258,6 +258,321 @@ WHERE key = 'DCOILBRENTEU'
     > '01-01-2001'
 ORDER BY date
 
+--FX RATES START HERE
+
+-- @~fetch_usdthb
+SELECT date + INTERVAL '56 days' as date, rate as usdthb
+FROM market."fx-daily"
+WHERE key = 'USDTHB'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdaed
+SELECT date + INTERVAL '56 days' as date, rate as usdaed
+FROM market."fx-daily"
+WHERE key = 'USDAED'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdcny
+SELECT date + INTERVAL '56 days' as date, rate as usdcny
+FROM market."fx-daily"
+WHERE key = 'USDCNY'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_nzdusd
+SELECT date + INTERVAL '56 days' as date, rate as nzdusd
+FROM market."fx-daily"
+WHERE key = 'NZDUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdnok
+SELECT date + INTERVAL '56 days' as date, rate as usdnok
+FROM market."fx-daily"
+WHERE key = 'USDNOK'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdsek
+SELECT date + INTERVAL '56 days' as date, rate as usdsek
+FROM market."fx-daily"
+WHERE key = 'USDSEK'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdils
+SELECT date + INTERVAL '56 days' as date, rate as usdils
+FROM market."fx-daily"
+WHERE key = 'USDILS'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_ethusd
+SELECT date + INTERVAL '56 days' as date, rate as ethusd
+FROM market."fx-daily"
+WHERE key = 'ETHUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdtwd
+SELECT date + INTERVAL '56 days' as date, rate as usdtwd
+FROM market."fx-daily"
+WHERE key = 'USDTWD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_audusd
+SELECT date + INTERVAL '56 days' as date, rate as audusd
+FROM market."fx-daily"
+WHERE key = 'AUDUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdtry
+SELECT date + INTERVAL '56 days' as date, rate as usdtry
+FROM market."fx-daily"
+WHERE key = 'USDTRY'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdmyr
+SELECT date + INTERVAL '56 days' as date, rate as usdmyr
+FROM market."fx-daily"
+WHERE key = 'USDMYR'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdinr
+SELECT date + INTERVAL '56 days' as date, rate as usdinr
+FROM market."fx-daily"
+WHERE key = 'USDINR'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdhkd
+SELECT date + INTERVAL '56 days' as date, rate as usdinr
+FROM market."fx-daily"
+WHERE key = 'USDHKD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdczk
+SELECT date + INTERVAL '56 days' as date, rate as usdczk
+FROM market."fx-daily"
+WHERE key = 'USDCZK'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdidr
+SELECT date + INTERVAL '56 days' as date, rate as usdidr
+FROM market."fx-daily"
+WHERE key = 'USDIDR'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_xrpusd
+SELECT date + INTERVAL '56 days' as date, rate as xrpusd
+FROM market."fx-daily"
+WHERE key = 'XRPUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdbhd
+SELECT date + INTERVAL '56 days' as date, rate as usdbhd
+FROM market."fx-daily"
+WHERE key = 'USDBHD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_gbpusd
+SELECT date + INTERVAL '56 days' as date, rate as gbpusd
+FROM market."fx-daily"
+WHERE key = 'GBPUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdbgn
+SELECT date + INTERVAL '56 days' as date, rate as usdbgn
+FROM market."fx-daily"
+WHERE key = 'USDBGN'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdkwd
+SELECT date + INTERVAL '56 days' as date, rate as usdkwd
+FROM market."fx-daily"
+WHERE key = 'USDKWD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdkrw
+SELECT date + INTERVAL '56 days' as date, rate as usdkrw
+FROM market."fx-daily"
+WHERE key = 'USDKRW'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usddkk
+SELECT date + INTERVAL '56 days' as date, rate as usddkk
+FROM market."fx-daily"
+WHERE key = 'USDDKK'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdcad
+SELECT date + INTERVAL '56 days' as date, rate as usdcad
+FROM market."fx-daily"
+WHERE key = 'USDCAD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdzar
+SELECT date + INTERVAL '56 days' as date, rate as usdzar
+FROM market."fx-daily"
+WHERE key = 'USDZAR'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdcnh
+SELECT date + INTERVAL '56 days' as date, rate as usdcnh
+FROM market."fx-daily"
+WHERE key = 'USDCNH'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdpln
+SELECT date + INTERVAL '56 days' as date, rate as usdpln
+FROM market."fx-daily"
+WHERE key = 'USDPLN'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdsgd
+SELECT date + INTERVAL '56 days' as date, rate as usdsgd
+FROM market."fx-daily"
+WHERE key = 'USDSGD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_bchusd
+SELECT date + INTERVAL '56 days' as date, rate as bchusd
+FROM market."fx-daily"
+WHERE key = 'BCHUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_ltcusd
+SELECT date + INTERVAL '56 days' as date, rate as ltcusd
+FROM market."fx-daily"
+WHERE key = 'LTCUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_btcusd
+SELECT date + INTERVAL '56 days' as date, rate as btcusd
+FROM market."fx-daily"
+WHERE key = 'BTCUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdjpy
+SELECT date + INTERVAL '56 days' as date, rate as usdjpy
+FROM market."fx-daily"
+WHERE key = 'USDJPY'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdmxn
+SELECT date + INTERVAL '56 days' as date, rate as usdmxn
+FROM market."fx-daily"
+WHERE key = 'USDMXN'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdhuf
+SELECT date + INTERVAL '56 days' as date, rate as usdhuf
+FROM market."fx-daily"
+WHERE key = 'USDHUF'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdchf
+SELECT date + INTERVAL '56 days' as date, rate as usdchf
+FROM market."fx-daily"
+WHERE key = 'USDCHF'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdsar
+SELECT date + INTERVAL '56 days' as date, rate as usdsar
+FROM market."fx-daily"
+WHERE key = 'USDSAR'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdron
+SELECT date + INTERVAL '56 days' as date, rate as usdron
+FROM market."fx-daily"
+WHERE key = 'USDRON'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_eurusd
+SELECT date + INTERVAL '56 days' as date, rate as eurusd
+FROM market."fx-daily"
+WHERE key = 'EURUSD'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_usdrub
+SELECT date + INTERVAL '56 days' as date, rate as usdrub
+FROM market."fx-daily"
+WHERE key = 'USDRUB'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+
 
 
 

@@ -21,7 +21,7 @@ class Iex:
         self.engine = POSTGRES_URL
         self.version = 'v1/data/CORE/'
         self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
-        self.market_endpoints = ['MORTGAGE', 'ECONOMIC', 'ENERGY']
+        self.market_endpoints = ['MORTGAGE', 'ECONOMIC', 'ENERGY','FX-DAILY']
         self.endpoints = self.market_endpoints + self.stock_endpoints
         self.current_tables = pd.read_sql("SELECT table_name "
                                           "FROM information_schema.tables "
@@ -132,8 +132,8 @@ class Pipeline(Iex):
 
     def fx_rates(self, symbol, last=1):
         logger.info(f'Grabbing last {last} foreign exchange datapoints for {symbol}')
-        url = self.url + f'FX/{symbol}'
-        logger.info(f'Pinging {url} for treasury data')
+        url = self.url + f'FX-DAILY/{symbol}'
+        logger.info(f'Pinging {url} for foreign exchange data')
         r = requests.get(url, params={'token': self.token, 'last': last})
         return self.json_to_dataframe(r)
 
@@ -163,6 +163,9 @@ class Pipeline(Iex):
             df = self.economic(symbol, records_to_pull)
         if endpoint_name == 'ENERGY':
             df = self.energy(symbol, records_to_pull)
+        if endpoint_name == 'FX-DAILY':
+            df = self.fx_rates(symbol, records_to_pull)
+            df['date'] = df['date'].apply(lambda row: datetime.fromtimestamp(int(row) / 1000).strftime('%Y-%m-%d %H:%M:%S'))
 
         if endpoint_name in ('ECONOMIC', 'ENERGY'):
             epoch_time = df.loc[df['frequency'].isna()]
@@ -188,6 +191,8 @@ class Pipeline(Iex):
             for endpoint_name, endpoint_info in endpoint.items():
                 keys_and_counts = dict(zip(endpoint_info['key'], endpoint_info['count']))
                 for key, count in keys_and_counts.items():
+                    if endpoint_name == 'FX':
+                        print(key, count)
                     sleep(.1)
                     current_records = self.examine_current_records(endpoint_name, key)
                     records_to_pull = count - current_records
@@ -205,4 +210,4 @@ class Pipeline(Iex):
 
 if __name__=='__main__':
     self = Pipeline()
-    self.update_data()
+    self.update_data()#

@@ -110,7 +110,7 @@ class ClassificationModel(ModelBase):
         super().__init__(stocks, validate, features)
 
     def _create_model(self):
-        tuner = tfdf.tuner.RandomSearch(num_trials=3)
+        tuner = tfdf.tuner.RandomSearch(num_trials=100)
         tuner.choice("min_examples", [2, 5, 7, 10])
         tuner.choice("categorical_algorithm", ["CART", "RANDOM"])
         local_search_space = tuner.choice("growing_strategy", ["LOCAL"])
