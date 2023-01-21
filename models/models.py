@@ -110,7 +110,7 @@ class ClassificationModel(ModelBase):
         super().__init__(stocks, validate, features)
 
     def _create_model(self):
-        tuner = tfdf.tuner.RandomSearch(num_trials=1)
+        tuner = tfdf.tuner.RandomSearch(num_trials=3)
         tuner.choice("min_examples", [2, 5, 7, 10])
         tuner.choice("categorical_algorithm", ["CART", "RANDOM"])
         local_search_space = tuner.choice("growing_strategy", ["LOCAL"])
@@ -178,7 +178,10 @@ class ClassificationModel(ModelBase):
     def recommender(prediction_results):
         #  price to book value between 0 and 4, and prediction value of .5 or greater is what we look to invest in.
         price_to_bookvalue_and_equity = pd.read_sql(
-            'SELECT symbol, "filingDate" as date, "pToBv", "pToE" FROM market.fundamental_valuations '
+            'SELECT symbol, '
+            '"filingDate" as date, '
+            '"pToBv", '
+            '"pToE" FROM market.fundamental_valuations '
             f'WHERE symbol IN {str(tuple(prediction_results["symbol"].to_list()))} ORDER BY "filingDate" DESC '
             f'LIMIT {len(prediction_results)}', con=POSTGRES_URL)
 
@@ -188,12 +191,17 @@ class ClassificationModel(ModelBase):
         closing_prices = pd.read_sql(f'SELECT symbol, date, close '
                                      f'FROM market.stock_prices '
                                      f'WHERE symbol in {str(tuple(prediction_results["symbol"].to_list()))} '
-                                     f'AND date in {str(tuple(prediction_results["date"].astype(str)))}',con=POSTGRES_URL)
+                                     f'AND date in {str(tuple(prediction_results["date"].astype(str)))}',
+                                     con=POSTGRES_URL)
 
-        prediction_results = prediction_results.merge(closing_prices, on=['symbol','date'])
+        results = prediction_results.merge(closing_prices, on=['symbol', 'date'])
 
-
-        return prediction_results
+        # we don't just buy anything the model classifies as a buy. We look for
+        # a reasonable price to book value, and positive earnings.
+        return results.loc[(results['predictions'] > .5)
+                           & (results['pToBv'] > 0)
+                           & (results['pToE'] > 0)
+                           ]
 
     def predict(self):
         to_drop = ['entry_id', 'date', 'date_prev']
@@ -461,5 +469,3 @@ class PredictionPipeline:
 
     def predict(self):
         return self.model.predict()
-
-

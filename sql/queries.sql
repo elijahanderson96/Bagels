@@ -41,7 +41,7 @@ SELECT entry_id,
        "freeCashFlow",
        "freeCashFlowGrowth",
        "freeCashFlowToRevenue",
-       "filingDate" + INTERVAL '91 days' as date, "filingDate" as date_prev, "goodwillTotal", "incomeNetPerWabsoSplitAdjustedYoyDeltaPercent", "incomeNetPerWadsoSplitAdjusted", "incomeNetPerWadsoSplitAdjustedYoyDeltaPercent", "incomeNetPreTax", "interestBurden", "inventoryTurnover", "investedCapital", "investedCapitalGrowth", "investedCapitalTurnover", leverage, "netDebt", "netIncomeGrowth", "netIncomeToRevenue", "netWorkingCapital", "netWorkingCapitalGrowth", "nibclRevenueDeferredTurnover", nopat, "nopatGrowth", "operatingCashFlowGrowth", "operatingCashFlowInterestCoverage", "operatingCfToRevenue", "operatingReturnOnAssets", "pretaxIncomeMargin", "priceAccountingPeriodEnd", "priceToRevenue", "pToBv", "pToE", "quickRatio", "returnOnAssets", "returnOnEquity", "revenueGrowth", roce, roic, symbol, "taxBurden", "workingCapitalTurnover"
+       "filingDate" + INTERVAL '91 days' as date, "filingDate" as date_prev, "goodwillTotal", "incomeNetPerWabsoSplitAdjustedYoyDeltaPercent", "incomeNetPerWadsoSplitAdjusted", "incomeNetPerWadsoSplitAdjustedYoyDeltaPercent", "incomeNetPreTax", "interestBurden", "inventoryTurnover", "investedCapital", "investedCapitalGrowth", "investedCapitalTurnover", leverage, "netDebt", "netIncomeGrowth", "netIncomeToRevenue", "netWorkingCapital", "netWorkingCapitalGrowth", "nibclRevenueDeferredTurnover", nopat, "nopatGrowth", "operatingCashFlowGrowth", "operatingCfToRevenue", "operatingReturnOnAssets", "pretaxIncomeMargin", "priceAccountingPeriodEnd", "priceToRevenue", "pToBv", "pToE", "quickRatio", "returnOnAssets", "returnOnEquity", "revenueGrowth", symbol, "taxBurden", "workingCapitalTurnover"
 FROM market.fundamental_valuations
 WHERE symbol in SYMBOLS
   AND subkey='ttm'
@@ -66,7 +66,7 @@ FROM market.stock_prices sp
 
 
 -- @~fetch_real_gdp
-SELECT date + INTERVAL '91 days' as date, value as real_gdp
+SELECT date + INTERVAL '140 days' as date, value as real_gdp
 FROM market.economic
 WHERE key ='A191RL1Q225SBEA'
   AND date
@@ -74,7 +74,7 @@ WHERE key ='A191RL1Q225SBEA'
 ORDER BY date
 
 -- @~fetch_fed_funds
-SELECT date + INTERVAL '91 days' as date, value as fed_funds_rate
+SELECT date + INTERVAL '140 days' as date, value as fed_funds_rate
 FROM market.economic
 WHERE key ='FEDFUNDS'
   AND date
@@ -82,7 +82,7 @@ WHERE key ='FEDFUNDS'
 ORDER BY date
 
 -- @~fetch_comm_paper_outstanding
-SELECT date + INTERVAL '91 days' as date, value as comm_paper_outstanding
+SELECT date + INTERVAL '70 days' as date, value as comm_paper_outstanding
 FROM market.economic
 WHERE key ='COMPOUT'
   AND date
@@ -90,7 +90,7 @@ WHERE key ='COMPOUT'
 ORDER BY date
 
 -- @~fetch_unemployment_claims
-SELECT date + INTERVAL '91 days' as date, value as unemployment_claims
+SELECT date + INTERVAL '70 days' as date, value as unemployment_claims
 FROM market.economic
 WHERE key ='IC4WSA'
   AND date
@@ -98,7 +98,7 @@ WHERE key ='IC4WSA'
 ORDER BY date
 
 -- @~fetch_cpi
-SELECT date + INTERVAL '91 days' as date, value as cpi
+SELECT date + INTERVAL '140 days' as date, value as cpi
 FROM market.economic
 WHERE key ='CPIAUCSL'
   AND date
@@ -106,7 +106,7 @@ WHERE key ='CPIAUCSL'
 ORDER BY date
 
 -- @~fetch_vehicle_sales
-SELECT date + INTERVAL '91 days' as date, value as vehicle_sales
+SELECT date + INTERVAL '140 days' as date, value as vehicle_sales
 FROM market.economic
 WHERE key ='TOTALSA'
   AND date
@@ -146,7 +146,7 @@ WHERE key ='PAYEMS'
 ORDER BY date
 
 -- @~fetch_recession_probability
-SELECT date + INTERVAL '91 days' as date, value as recession_probability
+SELECT date + INTERVAL '112 days' as date, value as recession_probability
 FROM market.economic
 WHERE key ='RECPROUSM156N'
   AND date
@@ -176,5 +176,94 @@ WHERE key ='MORTGAGE30US'
   AND date
     > '01-01-2001'
 ORDER BY date
+
+-- @~fetch_propane
+SELECT date + INTERVAL '56 days' as date, value as propane_prices
+FROM market.energy
+WHERE key = 'DPROPANEMBTX'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_crude_oil_wti
+SELECT date + INTERVAL '56 days' as date, value as crude_oil_wti_prices
+FROM market.energy
+WHERE key = 'DCOILWTICO'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+
+-- @~fetch_heating_oil
+SELECT date + INTERVAL '56 days' as date, value as heating_oil_prices
+FROM market.energy
+WHERE key = 'DHOILNYH'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_gas_russia
+SELECT date + INTERVAL '56 days' as date, value as gas_russia_prices
+FROM market.energy
+WHERE key = 'GASPRMCOVW'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_diesel
+SELECT date + INTERVAL '56 days' as date, value as diesel_prices
+FROM market.energy
+WHERE key = 'GASDESW'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_midgrade_conventional_gas
+SELECT date + INTERVAL '56 days' as date, value as midgrade_conventional_gas_prices
+FROM market.energy
+WHERE key = 'GASMIDCOVW'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_regular_conventional_gas
+SELECT date + INTERVAL '56 days' as date, value as regular_conventional_gas_prices
+FROM market.energy
+WHERE key = 'GASREGCOVW'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_jet_fuel
+SELECT date + INTERVAL '56 days' as date, value as jetfuel_prices
+FROM market.energy
+WHERE key = 'DJFUELUSGULF'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_henry_hub_natural_gas
+SELECT date + INTERVAL '56 days' as date, value as henry_hub_natural_gas_prices
+FROM market.energy
+WHERE key = 'DHHNGSP'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+-- @~fetch_crude_oil_brent
+SELECT date + INTERVAL '56 days' as date, value as europe_oil_prices
+FROM market.energy
+WHERE key = 'DCOILBRENTEU'
+  AND date
+    > '01-01-2001'
+ORDER BY date
+
+
+
+
+
+
+
+
 
 

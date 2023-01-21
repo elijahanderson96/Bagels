@@ -1,7 +1,7 @@
 import logging
 from time import sleep
 from traceback import print_exc
-
+from datetime import datetime
 import pandas as pd
 import requests
 from sqlalchemy import create_engine
@@ -21,7 +21,7 @@ class Iex:
         self.engine = POSTGRES_URL
         self.version = 'v1/data/CORE/'
         self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
-        self.market_endpoints = ['MORTGAGE', 'ECONOMIC']
+        self.market_endpoints = ['MORTGAGE', 'ECONOMIC', 'ENERGY']
         self.endpoints = self.market_endpoints + self.stock_endpoints
         self.current_tables = pd.read_sql("SELECT table_name "
                                           "FROM information_schema.tables "
@@ -131,10 +131,18 @@ class Pipeline(Iex):
         return self.json_to_dataframe(r)
 
     def fx_rates(self, symbol, last=1):
-        logger.info(f'Grabbing last {last} treasury reports for {symbol}')
+        logger.info(f'Grabbing last {last} foreign exchange datapoints for {symbol}')
         url = self.url + f'FX/{symbol}'
         logger.info(f'Pinging {url} for treasury data')
         r = requests.get(url, params={'token': self.token, 'last': last})
+        return self.json_to_dataframe(r)
+
+    def energy(self, symbol, last=1):
+        logger.info(f'Grabbing last {last} energy reports for {symbol}')
+        url = self.url + f'ENERGY/{symbol}'
+        logger.info(f'Pinging {url} for treasury data')
+        r = requests.get(url, params={'token': self.token, 'last': last})
+        return self.json_to_dataframe(r)
 
     def ping_endpoint(self, endpoint_name, symbol, records_to_pull=0):
         """This is a rather crude but effective way of implementing which
@@ -153,9 +161,16 @@ class Pipeline(Iex):
             df = self.mortgage(symbol, records_to_pull)
         if endpoint_name == 'ECONOMIC':
             df = self.economic(symbol, records_to_pull)
+        if endpoint_name == 'ENERGY':
+            df = self.energy(symbol, records_to_pull)
 
+        if endpoint_name in ('ECONOMIC', 'ENERGY'):
+            epoch_time = df.loc[df['frequency'].isna()]
+            epoch_time['date'] = epoch_time['date'].apply(lambda row: datetime.fromtimestamp(int(row) / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+            df.drop(df.loc[df['frequency'].isna()].index, inplace=True)
+            df = pd.concat([df, epoch_time])
         try:
-            df['date'] = df['date'].astype('datetime64[ns]') if endpoint_name != 'FUNDAMENTAL_VALUATIONS' else None
+
             df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='market')
 
         except Exception:
@@ -188,3 +203,6 @@ class Pipeline(Iex):
         logger.info('All data has been updated')
 
 
+if __name__=='__main__':
+    self = Pipeline()
+    self.update_data()

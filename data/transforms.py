@@ -54,10 +54,12 @@ class FeaturePrepper:
                         logger.warning(f'{dataset} is not up to date. Consider re-ingesting the data. '
                                        f'We cannot build models with this feature as it stands.')
                 else:
+                    logger.info(f'{dataset}')
                     left_join_df = left_join_df.merge(contents, on='date').drop_duplicates()
+                    logger.info(f'{left_join_df.shape}')
 
         logger.info(f'Final data is of shape {left_join_df.shape}.')
-        return left_join_df
+        return left_join_df.drop_duplicates(subset=['symbol', 'date'])
 
     @staticmethod
     def _interpolate(df_chunk):
@@ -98,20 +100,30 @@ class FeaturePrepper:
 
 if __name__ == '__main__':
     self = FeaturePrepper(['fundamental_valuations',
-                           'fetch_5Ymortgage_rates',
-                           'fetch_15Ymortgage_rates',
-                           'fetch_30Ymortgage_rates',
-                           'fetch_recession_probability',
-                           'fetch_num_total_employees',
-                           'fetch_housing_starts',
-                           'fetch_industrial_production',
-                           'fetch_unemployment_rate',
-                           'fetch_vehicle_sales',
-                           'fetch_cpi',
-                           'fetch_unemployment_claims',
-                           'fetch_comm_paper_outstanding',
-                           'fetch_fed_funds',
-                           'fetch_real_gdp'],
+                                         'fetch_5Ymortgage_rates',
+                                         'fetch_15Ymortgage_rates',
+                                         'fetch_30Ymortgage_rates',
+                                         'fetch_recession_probability',
+                                         'fetch_num_total_employees',
+                                         'fetch_housing_starts',
+                                         'fetch_industrial_production',
+                                         'fetch_unemployment_rate',
+                                         'fetch_vehicle_sales',
+                                         'fetch_cpi',
+                                         'fetch_unemployment_claims',
+                                         'fetch_comm_paper_outstanding',
+                                         'fetch_fed_funds',
+                                         'fetch_real_gdp',
+                                         'fetch_crude_oil_brent',
+                                         'fetch_henry_hub_natural_gas',
+                                         'fetch_jet_fuel',
+                                         'fetch_regular_conventional_gas',
+                                         'fetch_midgrade_conventional_gas',
+                                         'fetch_diesel',
+                                         'fetch_gas_russia',
+                                         'fetch_heating_oil',
+                                         'fetch_crude_oil_wti',
+                                         'fetch_propane'],
                           params={'SYMBOLS': str(('JPM', 'MS', 'GS'))})
 
     left = 'fundamental_valuations'

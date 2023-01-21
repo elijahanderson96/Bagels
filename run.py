@@ -11,6 +11,8 @@ today = today.strftime("%b_%d_%Y")
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+pd.set_option('display.max_rows', 500)
+
 if __name__ == '__main__':
     DataGetter = Pipeline()
     DataGetter.update_data()
@@ -19,7 +21,7 @@ if __name__ == '__main__':
     symbols = pd.Series([symbol for symbol in SYMBOLS if symbol not in EXCLUDE_LIST])
     model = PredictionPipeline(symbols=symbols,
                                model_type='classify',
-                               validate=True,
+                               validate=False,
                                features=['fundamental_valuations',
                                          'fetch_5Ymortgage_rates',
                                          'fetch_15Ymortgage_rates',
@@ -34,7 +36,22 @@ if __name__ == '__main__':
                                          'fetch_unemployment_claims',
                                          'fetch_comm_paper_outstanding',
                                          'fetch_fed_funds',
-                                         'fetch_real_gdp'])
+                                         'fetch_real_gdp',
+                                         'fetch_crude_oil_brent',
+                                         'fetch_henry_hub_natural_gas',
+                                         'fetch_jet_fuel',
+                                         'fetch_regular_conventional_gas',
+                                         'fetch_midgrade_conventional_gas',
+                                         'fetch_diesel',
+                                         'fetch_gas_russia',
+                                         'fetch_heating_oil',
+                                         'fetch_crude_oil_wti',
+                                         'fetch_propane'])
     model.train()
     prediction_scores = model.predict()
-
+    print(prediction_scores)
+    prediction_scores.to_sql(schema='market',
+                             name='classify_results',
+                             con=POSTGRES_URL,
+                             if_exists='replace'
+                         )
