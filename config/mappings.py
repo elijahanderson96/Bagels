@@ -1,2 +1,21 @@
-HEALTHCARE_SECTOR = ['ABBV', 'ABC', 'ABMD', 'ABT', 'ALC', 'ALGN', 'ALNY', 'AMGN', 'ARGX', 'AZN', 'BAX', 'BDX', 'BGNE', 'BHVN', 'BIIB', 'BMRN', 'BMY', 'BNTX', 'BSX', 'CAH', 'CI', 'CNC', 'COO', 'CTLT', 'CVS', 'DGX', 'DHR', 'DXCM', 'ELV', 'EW', 'FMS', 'GILD', 'GMAB', 'HCA', 'HOLX', 'HSIC', 'HUM', 'HZNP', 'ICLR', 'IDXX', 'ILMN', 'INCY', 'IQV', 'ISRG', 'JNJ', 'LH', 'LLY', 'MCK', 'MDT', 'MOH', 'MRK', 'MRNA', 'MTD', 'NVO', 'NVS', 'PFE', 'PHG', 'PKI', 'PODD', 'QGEN', 'REGN', 'RGEN', 'RMD', 'RPRX', 'SGEN', 'SNN', 'SNY', 'STE', 'SWAV', 'SYK', 'TAK', 'TECH', 'TEVA', 'TFX', 'UNH', 'VEEV', 'VRTX', 'WAT', 'WST', 'ZBH', 'ZTS']
-FINANCE_SECTOR = ['ACGL', 'AFG', 'AFL', 'AIG', 'AJG', 'ALL', 'ALLY', 'AMP', 'AMT', 'AON', 'APO', 'ARES', 'AXP', 'BAC', 'BAP', 'BBD', 'BBDO', 'BBVA', 'BCS', 'BEKE', 'BEN', 'BK', 'BLK', 'BRO', 'BSBR', 'BX', 'C', 'CB', 'CBOE', 'CBRE', 'CFG', 'CG', 'CINF', 'CMA', 'CME', 'CNA', 'COF', 'CS', 'CSGP', 'DB', 'DFS', 'EFX', 'ERIE', 'EWBC', 'FCNCA', 'FDS', 'FHN', 'FITB', 'FNF', 'FRC', 'GS', 'HBAN', 'HDB', 'HIG', 'HSBC', 'IBN', 'ICE', 'ING', 'IT', 'ITUB', 'IX', 'JPM', 'KB', 'KEY', 'KKR', 'L', 'LFC', 'LPLA', 'LYG', 'MCO', 'MET', 'MFG', 'MKL', 'MMC', 'MS', 'MSCI', 'MTB', 'MUFG', 'NDAQ', 'NIO', 'NMR', 'NTRS', 'PFG', 'PGR', 'PNC', 'PRU', 'PUK', 'RE', 'RF', 'RJF', 'SAN', 'SBNY', 'SCHW', 'SHG', 'SIVB', 'SMFG', 'SPGI', 'STT', 'SYF', 'TFC', 'TROW', 'TRU', 'TRV', 'TW', 'UBS', 'USB', 'WFC', 'WRB', 'WTW', 'XP', 'Y']
+HEALTHCARE_SECTOR = ['ABBV', 'ABC', 'ABMD', 'ABT', 'ALC', 'ALGN', 'ALNY', 'AMGN', 'ARGX', 'AZN', 'BAX', 'BDX', 'BGNE',
+                     'BHVN', 'BIIB', 'BMRN', 'BMY', 'BNTX', 'BSX', 'CAH', 'CI', 'CNC', 'COO', 'CTLT', 'CVS', 'DGX',
+                     'DHR', 'DXCM', 'ELV', 'EW', 'FMS', 'GILD', 'GMAB', 'HCA', 'HOLX', 'HSIC', 'HUM', 'HZNP', 'ICLR',
+                     'IDXX', 'ILMN', 'INCY', 'IQV', 'ISRG', 'JNJ', 'LH', 'LLY', 'MCK', 'MDT', 'MOH', 'MRK', 'MRNA',
+                     'MTD', 'NVO', 'NVS', 'PFE', 'PHG', 'PKI', 'PODD', 'QGEN', 'REGN', 'RGEN', 'RMD', 'RPRX', 'SGEN',
+                     'SNN', 'SNY', 'STE', 'SWAV', 'SYK', 'TAK', 'TECH', 'TEVA', 'TFX', 'UNH', 'VEEV', 'VRTX', 'WAT',
+                     'WST', 'ZBH', 'ZTS']
+FINANCE_SECTOR = ['ACGL', 'AFG', 'AFL', 'AIG', 'AJG', 'ALL', 'ALLY', 'AMP', 'AMT', 'AON', 'APO', 'ARES', 'AXP', 'BAC',
+                  'BAP', 'BBD', 'BBDO', 'BBVA', 'BCS', 'BEKE', 'BEN', 'BK', 'BLK', 'BRO', 'BSBR', 'BX', 'C', 'CB',
+                  'CBOE', 'CBRE', 'CFG', 'CG', 'CINF', 'CMA', 'CME', 'CNA', 'COF', 'CS', 'CSGP', 'DB', 'DFS', 'EFX',
+                  'ERIE', 'EWBC', 'FCNCA', 'FDS', 'FHN', 'FITB', 'FNF', 'FRC', 'GS', 'HBAN', 'HDB', 'HIG', 'HSBC',
+                  'IBN', 'ICE', 'ING', 'IT', 'ITUB', 'IX', 'JPM', 'KB', 'KEY', 'KKR', 'L', 'LFC', 'LPLA', 'LYG', 'MCO',
+                  'MET', 'MFG', 'MKL', 'MMC', 'MS', 'MSCI', 'MTB', 'MUFG', 'NDAQ', 'NIO', 'NMR', 'NTRS', 'PFG', 'PGR',
+                  'PNC', 'PRU', 'PUK', 'RE', 'RF', 'RJF', 'SAN', 'SBNY', 'SCHW', 'SHG', 'SIVB', 'SMFG', 'SPGI', 'STT',
+                  'SYF', 'TFC', 'TROW', 'TRU', 'TRV', 'TW', 'UBS', 'USB', 'WFC', 'WRB', 'WTW', 'XP', 'Y']
+ENERGY_SECTOR = ['XOM', 'CVX', 'SHEL', 'TTE', 'COP', 'BP', 'EQNR', 'ENB', 'SLB', 'EOG', 'PBR', 'CNQ', 'OXY',
+                 'MPC', 'PXD', 'EPD', 'VLO', 'E', 'PSX', 'WDS', 'HES', 'SU', 'TRP', 'DVN', 'KMI', 'ET', 'WMB', 'HAL',
+                 'CVE', 'MPLX', 'BKR', 'OKE', 'FANG', 'EC', 'TS', 'CTRA', 'PBA', 'MRO', 'TRGP', 'TPL', 'APA',
+                 'EQT', 'EQT', 'OVV', 'DINO', 'CCJ', 'MMP', 'WES', 'NOV', 'AR', 'DCP', 'YPF', 'PAA',
+                 'HESM', 'MTDR', 'MUR', 'MGY', 'RRC', 'SWN', 'CHX', 'CSAN', 'PDCE', 'ENLC', 'VVV', 'CHRD', 'PBF', 'PR',
+                 'FTI', 'VAL', 'CIVI']

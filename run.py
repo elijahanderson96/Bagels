@@ -1,6 +1,7 @@
 from datetime import date
 
 from config.common import *
+from config.mappings import *
 from data.iex import Pipeline
 from data.labels import Prices
 from models.models import PredictionPipeline
@@ -15,11 +16,11 @@ pd.set_option('display.max_rows', 500)
 
 if __name__ == '__main__':
     DataGetter = Pipeline()
-    DataGetter.update_data()
+    # DataGetter.update_data()
     prices = Prices()
-    prices.update_db()
+    # prices.update_db()
     symbols = pd.Series([symbol for symbol in SYMBOLS if symbol not in EXCLUDE_LIST])
-    model = PredictionPipeline(symbols=symbols,
+    model = PredictionPipeline(symbols=ENERGY_SECTOR,
                                model_type='classify',
                                validate=False,
                                features=['fundamental_valuations',
@@ -47,45 +48,6 @@ if __name__ == '__main__':
                                          'fetch_heating_oil',
                                          'fetch_crude_oil_wti',
                                          'fetch_propane',
-                                         'fetch_eurusd',
-                                         'fetch_usdthb',
-                                         'fetch_usdaed',
-                                         'fetch_usdcny',
-                                         'fetch_nzdusd',
-                                         'fetch_usdnok',
-                                         'fetch_usdsek',
-                                         'fetch_usdils',
-                                         'fetch_ethusd',
-                                         'fetch_usdtwd',
-                                         'fetch_audusd',
-                                         'fetch_usdtry',
-                                         'fetch_usdmyr',
-                                         'fetch_usdinr',
-                                         'fetch_usdhkd',
-                                         'fetch_usdczk',
-                                         'fetch_usdidr',
-                                         'fetch_xrpusd',
-                                         'fetch_usdbhd',
-                                         'fetch_gbpusd',
-                                         'fetch_usdbgn',
-                                         'fetch_usdkwd',
-                                         'fetch_usdkrw',
-                                         'fetch_usddkk',
-                                         'fetch_usdcad',
-                                         'fetch_usdzar',
-                                         'fetch_usdcnh',
-                                         'fetch_usdpln',
-                                         'fetch_usdsgd',
-                                         'fetch_bchusd',
-                                         'fetch_ltcusd',
-                                         'fetch_btcusd',
-                                         'fetch_usdjpy',
-                                         'fetch_usdmxn',
-                                         'fetch_usdhuf',
-                                         'fetch_usdchf',
-                                         'fetch_usdsar',
-                                         'fetch_usdron',
-                                         'fetch_usdrub',
                                          ])
     model.train()
     prediction_scores = model.predict()
@@ -94,4 +56,4 @@ if __name__ == '__main__':
                              name='classify_results',
                              con=POSTGRES_URL,
                              if_exists='replace'
-                         )
+                             )
