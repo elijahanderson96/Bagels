@@ -105,12 +105,12 @@ class ClassificationModel(ModelBase):
 
     def _create_model(self):
         tuner = tfdf.tuner.RandomSearch(num_trials=100)
-        tuner.choice("min_examples", [2, 5, 7, 10])
+        tuner.choice("min_examples", [2, 5, 7, 10, 14])
         tuner.choice("categorical_algorithm", ["CART", "RANDOM"])
         local_search_space = tuner.choice("growing_strategy", ["LOCAL"])
-        local_search_space.choice("max_depth", [3, 4, 5, 6, 8])
+        local_search_space.choice("max_depth", [3, 4, 5, 6, 8, 9])
         global_search_space = tuner.choice("growing_strategy", ["BEST_FIRST_GLOBAL"], merge=True)
-        global_search_space.choice("max_num_nodes", [16, 32, 64, 128, 256])
+        global_search_space.choice("max_num_nodes", [16, 32, 64, 128, 256, 512])
         tuner.choice("shrinkage", [0.02, 0.05, 0.10, 0.15])
         tuner.choice("num_candidate_attributes_ratio", [0.2, 0.5, 0.9, 1.0])
         tuner.choice("split_axis", ["AXIS_ALIGNED"])
