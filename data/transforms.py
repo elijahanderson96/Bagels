@@ -3,7 +3,8 @@ import logging
 
 import pandas as pd
 
-from config.common import POSTGRES_URL, QUERIES
+from config.common import QUERIES
+from config.configs import POSTGRES_URL
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class FeaturePrepper:
                     logger.info(f'{left_join_df.shape}')
 
         logger.info(f'Final data is of shape {left_join_df.shape}.')
+        print(left_join_df.sort_values(by='date', ascending=False)[['symbol', 'date']].head(25))
         return left_join_df.drop_duplicates(subset=['symbol', 'date'])
 
     @staticmethod

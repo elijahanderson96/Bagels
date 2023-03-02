@@ -1,10 +1,12 @@
 import datetime
+import logging
 from traceback import print_exc
 
+import pandas as pd
 from sqlalchemy import create_engine
 from yfinance import download
 
-from config.common import *
+from config.configs import POSTGRES_URL
 from data.iex import Iex
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)

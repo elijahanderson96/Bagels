@@ -9,8 +9,7 @@ FROM market.cash_flow
 WHERE symbol in SYMBOLS;
 
 -- @~fundamental_valuations
-SELECT entry_id,
-       "accountsReceivableTurnover",
+SELECT "accountsReceivableTurnover",
        "altmanZScore",
        "bookValuePerShare",
        "cashConversionCycle",
@@ -41,7 +40,21 @@ SELECT entry_id,
        "freeCashFlow",
        "freeCashFlowGrowth",
        "freeCashFlowToRevenue",
-       "filingDate" + INTERVAL '91 days' as date, "filingDate" as date_prev, "goodwillTotal", "incomeNetPerWabsoSplitAdjustedYoyDeltaPercent", "incomeNetPerWadsoSplitAdjusted", "incomeNetPerWadsoSplitAdjustedYoyDeltaPercent", "incomeNetPreTax", "interestBurden", "inventoryTurnover", "investedCapital", "investedCapitalGrowth", "investedCapitalTurnover", leverage, "netDebt", "netIncomeGrowth", "netIncomeToRevenue", "netWorkingCapital", "netWorkingCapitalGrowth", "nibclRevenueDeferredTurnover", nopat, "nopatGrowth", "operatingCashFlowGrowth", "operatingCfToRevenue", "operatingReturnOnAssets", "pretaxIncomeMargin", "priceAccountingPeriodEnd", "priceToRevenue", "pToBv", "pToE", "quickRatio", "returnOnAssets", "returnOnEquity", "revenueGrowth", symbol, "taxBurden", "workingCapitalTurnover"
+       "filingDate" + INTERVAL '91 days' as date,
+    "filingDate" as date_prev, "goodwillTotal",
+    "incomeNetPerWabsoSplitAdjustedYoyDeltaPercent",
+    "incomeNetPerWadsoSplitAdjusted",
+    "incomeNetPerWadsoSplitAdjustedYoyDeltaPercent",
+    "incomeNetPreTax", "interestBurden", "inventoryTurnover",
+    "investedCapital", "investedCapitalGrowth", "investedCapitalTurnover",
+    leverage, "netDebt", "netIncomeGrowth", "netIncomeToRevenue",
+    "netWorkingCapital", "netWorkingCapitalGrowth",
+    "nibclRevenueDeferredTurnover", nopat, "nopatGrowth",
+    "operatingCashFlowGrowth", "operatingCfToRevenue",
+    "operatingReturnOnAssets", "pretaxIncomeMargin",
+    "priceAccountingPeriodEnd", "priceToRevenue", "pToBv",
+    "pToE", "quickRatio", "returnOnAssets", "returnOnEquity",
+    "revenueGrowth", symbol, "taxBurden", "workingCapitalTurnover"
 FROM market.fundamental_valuations
 WHERE symbol in SYMBOLS
   AND subkey='ttm'

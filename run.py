@@ -3,7 +3,7 @@ from datetime import date
 
 import pandas as pd
 
-from config.common import POSTGRES_URL
+from config.configs import POSTGRES_URL
 from config.mappings import ENERGY_SECTOR, FINANCE_SECTOR, HEALTHCARE_SECTOR
 from data.iex import Pipeline
 from data.labels import Prices
@@ -21,7 +21,7 @@ if __name__ == '__main__':
     DataGetter = Pipeline()
     DataGetter.update_data()
     prices = Prices()
-    prices.update_db()
+    #prices.update_db()
     for industry, stocks in {'financial': FINANCE_SECTOR,
                              'healthcare': HEALTHCARE_SECTOR,
                              'energy': ENERGY_SECTOR}.items():

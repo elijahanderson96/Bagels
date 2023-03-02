@@ -5,7 +5,8 @@ import pandas as pd
 import tensorflow_decision_forests as tfdf
 from sklearn.model_selection import train_test_split
 
-from config.common import POSTGRES_URL, QUERIES
+from config.configs import POSTGRES_URL
+from config.common import QUERIES
 from data.transforms import FeaturePrepper
 
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
@@ -60,6 +61,7 @@ class ModelBase:
 
         #  take the max date of each symbol as prediction/test data.
         mask = self.test_data.groupby('symbol')['date'].transform(max) == self.test_data['date']
+        logger.info(f'Testing data is of shape {self.test_data.shape}')
         self.test_data = self.test_data[mask]
         self.stocks = list(self.test_data['symbol'].unique())
 
@@ -137,7 +139,7 @@ class ClassificationModel(ModelBase):
         self.train_data['buy_sell'] = self.train_data['marketcap'] - self.train_data['marketcap_prev']
         self.train_data['buy_sell'] = self.train_data['buy_sell'].apply(lambda row: 1 if row > 0 else 0)
 
-        to_drop = ['marketcap', 'marketcap_prev', 'entry_id', 'date', 'date_prev']
+        to_drop = ['marketcap', 'marketcap_prev', 'date', 'date_prev']
         self.train_data.drop(axis=1, inplace=True, labels=to_drop)
 
         if self.validate:
@@ -176,7 +178,8 @@ class ClassificationModel(ModelBase):
             '"filingDate" as date, '
             '"pToBv", '
             '"pToE" FROM market.fundamental_valuations '
-            f'WHERE symbol IN {str(tuple(prediction_results["symbol"].to_list()))} ORDER BY "filingDate" DESC '
+            f'WHERE symbol IN {str(tuple(prediction_results["symbol"]))} '
+            f'ORDER BY "filingDate" DESC '
             f'LIMIT {len(prediction_results)}', con=POSTGRES_URL)
 
         prediction_results = prediction_results.merge(price_to_bookvalue_and_equity, on='symbol').sort_values(
@@ -184,7 +187,7 @@ class ClassificationModel(ModelBase):
 
         closing_prices = pd.read_sql(f'SELECT symbol, date, close '
                                      f'FROM market.stock_prices '
-                                     f'WHERE symbol in {str(tuple(prediction_results["symbol"].to_list()))} '
+                                     f'WHERE symbol in {str(tuple(prediction_results["symbol"]))} '
                                      f'AND date in {str(tuple(prediction_results["date"].astype(str)))}',
                                      con=POSTGRES_URL)
 
@@ -198,7 +201,7 @@ class ClassificationModel(ModelBase):
                            ]
 
     def predict(self):
-        to_drop = ['entry_id', 'date', 'date_prev']
+        to_drop = ['date', 'date_prev']
         test_data = self.test_data.drop(axis=1, labels=to_drop)
         tf_test_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(test_data)
         self.test_data['predictions'] = self.model.predict(tf_test_dataset)
