@@ -1,13 +1,9 @@
 import logging
 from datetime import datetime
-from time import sleep
 from traceback import print_exc
 
 import pandas as pd
 import requests
-from sqlalchemy import create_engine
-from dateutil.relativedelta import relativedelta
-
 
 from config.configs import *
 
@@ -23,21 +19,15 @@ class Iex:
         self.token = TOKEN
         self.engine = POSTGRES_URL
         self.version = 'v1/data/CORE/'
-        self.stock_endpoints = ['FUNDAMENTAL_VALUATIONS']
-        self.market_endpoints = ['MORTGAGE', 'ECONOMIC', 'ENERGY', 'FX-DAILY']
-        self.endpoints = self.market_endpoints + self.stock_endpoints
-        self.current_tables = pd.read_sql("SELECT table_name "
-                                          "FROM information_schema.tables "
-                                          "WHERE table_schema = 'market';",
-                                          POSTGRES_URL)['table_name'].to_list()
-        self.tables = [table.lower() for table in (self.stock_endpoints + self.market_endpoints)]
+        self.url = self.base_url + self.version
 
     @staticmethod
     def json_to_dataframe(request):
-        df = pd.DataFrame()
+        tmp = []
         for entry in request.json():
             temp = pd.DataFrame([entry], columns=list(entry.keys()))
-            df = pd.concat([df, temp])
+            tmp.append(temp)
+        df = pd.concat(tmp) if tmp else pd.DataFrame()
         return df
 
     @staticmethod
@@ -53,7 +43,6 @@ class Iex:
 class Pipeline(Iex):
     def __init__(self):
         super().__init__()
-        self.url = self.base_url + self.version
 
     def fundamental_valuations(self, from_date, to_date=datetime.today().strftime('%Y-%m-%d')):
         logger.info(f'Grabbing all fundamentals reports data from {from_date}.')
@@ -74,7 +63,8 @@ class Pipeline(Iex):
         url = self.url + f'MORTGAGE'
         logger.info(f'Pinging {url} for mortgage data')
         r = requests.get(url, params={'from': from_date, 'to': to_date, 'token': self.token})
-        return self.json_to_dataframe(r)
+        df = self.json_to_dataframe(r)
+        return df[['date', 'value', 'key']].drop_duplicates()
 
     def treasury_rates(self, from_date, to_date=datetime.today().strftime('%Y-%m-%d')):
         """Only doing 10 year for now, id is dgs10"""
@@ -82,14 +72,16 @@ class Pipeline(Iex):
         url = self.url + f'TREASURY'
         logger.info(f'Pinging {url} for treasury data')
         r = requests.get(url, params={'from': from_date, 'to': to_date, 'token': self.token})
-        return self.json_to_dataframe(r)
+        df = self.json_to_dataframe(r)
+        return df[['date', 'value', 'key']].drop_duplicates()
 
     def economic(self, from_date, to_date=datetime.today().strftime('%Y-%m-%d')):
         logger.info(f'Grabbing data from {from_date} for treasury reports.')
         url = self.url + f'ECONOMIC'
         logger.info(f'Pinging {url} for economic data')
         r = requests.get(url, params={'from': from_date, 'to': to_date, 'token': self.token})
-        return self.json_to_dataframe(r)
+        df = self.json_to_dataframe(r)
+        return df[['date', 'value', 'key']].drop_duplicates()
 
     def fx_rates(self, from_date, to_date=datetime.today().strftime('%Y-%m-%d')):
         logger.info(f'Grabbing data from {from_date} for foreign exchange datapoints.')
@@ -103,58 +95,47 @@ class Pipeline(Iex):
         url = self.url + f'ENERGY'
         logger.info(f'Pinging {url} for energy data')
         r = requests.get(url, params={'from': from_date, 'to': to_date, 'token': self.token})
-        return self.json_to_dataframe(r)
+        df = self.json_to_dataframe(r)
+        return df[['date', 'value', 'key']].drop_duplicates()
+
+    def commodities(self):
+        pass
 
     def ping_endpoint(self, endpoint_name, pull_from, to_date):
         """This is a rather crude but effective way of implementing which
         function to call when we invoke the update_data method."""
         df = pd.DataFrame()
+
         if endpoint_name == 'fundamental_valuations':
             df = self.fundamental_valuations(pull_from, to_date)
+
         if endpoint_name == 'cash_flow':
             df = self.cash_flow(pull_from, to_date)
+
         if endpoint_name == 'treasury':
             df = self.treasury_rates(pull_from, to_date)
+
         if endpoint_name == 'mortgage':
             df = self.mortgage(pull_from, to_date)
-            df['date'] = df['date'].apply(
-                lambda row: datetime.fromtimestamp(int(row) / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+
         if endpoint_name == 'economic':
             df = self.economic(pull_from, to_date)
+
         if endpoint_name == 'energy':
             df = self.energy(pull_from, to_date)
 
-        #if endpoint_name == 'fx-daily':
-        #    df = self.fx_rates(pull_from, to_date)
-        #    df['date'] = df['date'].apply(
-        #        lambda row: datetime.fromtimestamp(int(row) / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+        if endpoint_name == 'historical_prices':
+            tmp = []
+            for symbol in ('MS', 'GS', 'JPM'):
+                tmp.append(self.historical_stock_prices(symbol, from_date='2000-01-01'))
+            df = pd.concat(tmp)
 
         try:
 
             if df.empty:
                 return logger.info(f'No data from {pull_from} to {to_date}')
 
-            # they unfortunately may have epoch time in these datasets that we have to cast.
-            if endpoint_name in ('economic', 'energy'):
-                epoch_time = df.loc[df['frequency'].isna()] if 'frequency' in df.columns.to_list() else None
-                if epoch_time:
-                    epoch_time['date'] = epoch_time['date'].apply(
-                        lambda row: datetime.fromtimestamp(int(row) / 1000).strftime('%Y-%m-%d %H:%M:%S'))
-                    df.drop(df.loc[df['frequency'].isna()].index, inplace=True)
-                    df = pd.concat([df, epoch_time])
-
-            df.drop(axis=1, inplace=True, labels="accountsPayable") \
-                if "accountsPayable" in df.columns.to_list() else None
-
-            df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='market')
-
-            # update the db, so we know what historical data we've collected.
-            pipeline_metadata = pd.read_sql('SELECT * FROM market.pipeline_metadata', con=POSTGRES_URL)
-            pipeline_metadata['last_updated'].loc[pipeline_metadata['endpoint_name'] == endpoint_name] \
-                = to_date.strftime('%Y-%m-%d')
-
-            pipeline_metadata.to_sql('pipeline_metadata', con=POSTGRES_URL, index=False, if_exists='replace',
-                                     schema='market')
+            df.to_sql(endpoint_name.lower(), con=POSTGRES_URL, index=False, if_exists='append', schema='bagels')
 
         except Exception:
             print_exc()
@@ -162,24 +143,22 @@ class Pipeline(Iex):
 
         return logger.info(f'{endpoint_name} updated with records from {pull_from}')
 
-    def update_data(self):
+    def update_data(self, from_scratch=False):
         """Pull the latest data for a stock.
         Arguments: stock {str} stock to find number of available records for.
         """
-        endpoint_metadata = pd.read_sql('SELECT * FROM market.pipeline_metadata', con=POSTGRES_URL)
+        endpoint_metadata = pd.read_sql('SELECT * FROM bagels.pipeline_metadata', con=POSTGRES_URL)
+        days = 100 if from_scratch else 1
         for from_date, endpoint in endpoint_metadata.itertuples(index=False, name=None):
             # there is a huge flaw in that they can only return 5000 data points at a time. We
             # will attempt to iterate by month to back fill data.
             logger.info(f'Updating {endpoint}, pulling all data from {from_date} to present.')
             try:
                 while pd.to_datetime(from_date) < datetime.today():
-                    to_date = pd.to_datetime(from_date) + pd.DateOffset(months=1)
+                    to_date = pd.to_datetime(from_date) + pd.DateOffset(days=days)
                     self.ping_endpoint(endpoint, from_date, to_date)
-                    from_date = pd.to_datetime(from_date) + pd.DateOffset(months=1)
+                    from_date = pd.to_datetime(from_date) + pd.DateOffset(days=days)
             except:
                 print_exc()
 
         logger.info('All data has been updated')
-
-
-self = Pipeline()
