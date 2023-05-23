@@ -52,6 +52,8 @@ if __name__ == '__main__':
         # cast date column as proper format. date col needs to always be 2nd
         df = convert_mixed_epoch(df, date_col)
 
+        df.rename(inplace=True, columns={date_col: 'date'})
+
         if metadata['upsample']:
             df = upsample_df(df, date_col, **metadata['upsample_kwargs'])
 

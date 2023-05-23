@@ -6,14 +6,7 @@ from traceback import print_exc
 import pandas as pd
 import requests
 
-from database import PostgresDB
-
-db_connector = PostgresDB(host='172.24.144.1',
-                          user='elijah',
-                          dbname='market_data',
-                          port='5432',
-                          password='Poodle!3')
-db_connector.connect()
+from database import db_connector
 
 
 def retrieve_data(base_url, start_date, end_date, chunk_size):
@@ -71,16 +64,11 @@ if __name__ == '__main__':
     base_url = f'https://cloud.iexapis.com/v1/data/CORE/{args.endpoint_name.upper()}'
 
     if args.endpoint_name.upper() == 'HISTORICAL_PRICES':
-        stocks = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
-        stocks = stocks[0]
-        symbols = stocks['Symbol'].to_list()
-        data = [fetch_data(base_url + f'/{symbol}',
-                           chunk_size=3650,
-                           start_date=start_date,
-                           end_date=end_date) for symbol in symbols]
+        stocks = ['VT', 'VYM', 'VTI', 'SPHD']
+        [fetch_data(base_url + f'/{symbol}',
+                    chunk_size=3650,
+                    start_date=start_date,
+                    end_date=end_date) for symbol in stocks]
 
     else:
         fetch_data(base_url, chunk_size=30, start_date=start_date, end_date=end_date)
-
-    import pandas as pd
-

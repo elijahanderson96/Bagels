@@ -31,6 +31,21 @@ tables = {
               'values': 'value'},  # value column to be extracted is value
          },
 
+    'historical_prices':
+        {'columns':
+             ['symbol', 'date', 'open', 'high', 'low', 'close'],
+         'upsample': False
+         },
+
+    'energy':
+        {'columns':
+             ['key', 'date', 'value'],
+         'upsample': True,
+         'upsample_kwargs':
+             {'pivot': True,
+              'columns': 'key',  # key column is going to be pivoted
+              'values': 'value'},  # value column to be extracted is value
+         },
     'rates':
         {'columns':
              ['key', 'date', 'value'],
@@ -40,19 +55,6 @@ tables = {
               'columns': 'key',  # key column is going to be pivoted
               'values': 'value'},  # value column to be extracted is value
          },
-
-    'historical_prices':
-        {'columns':
-             ['symbol', 'priceDate', 'open', 'high', 'low', 'close'],
-         'upsample': False
-         },
-
-    'energy':
-        {'columns':
-             ['key', 'date', 'value'],
-         'upsample_kwargs':
-             {'pivot': True,
-              'columns': 'key',  # key column is going to be pivoted
-              'values': 'value'},  # value column to be extracted is value
-         },
 }
+
+
