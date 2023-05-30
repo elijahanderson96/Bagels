@@ -26,9 +26,15 @@ def get_data_from_tables(table_names):
     """
     logging.info('Fetching data from tables...')
     db_connector.connect()
-    dfs = [db_connector.run_query(f'SELECT * FROM transform.{table}')
+
+    dfs = [db_connector.run_query(f'SELECT * FROM fred_raw.{table}')
            for table in table_names]
-    dfs = [df.drop(axis=1, labels=['id']) for df in dfs]
+
+    dfs = [df.drop(axis=1, labels=['endpoint_id']) for df in dfs]
+
+    for i, df in enumerate(dfs):
+        dfs[i] = df.rename(columns={'value': table_names[i]})
+
     logging.info('Data fetched successfully.')
     return dfs
 
@@ -62,7 +68,7 @@ def align_dates(df_list, date_column):
     return df_final
 
 
-def get_labels(symbols):
+def get_labels():
     """
     Fetch labels from the database and generate binary labels
     Returns:
@@ -70,8 +76,7 @@ def get_labels(symbols):
     """
     logging.info('Fetching and processing labels...')
     labels_df = db_connector.run_query('SELECT symbol, date, close'
-                                       ' FROM transform.historical_prices '
-                                       f"WHERE symbol in {symbols}")
+                                       ' FROM fred_raw.historical_prices ')
     labels_df['date'] = labels_df['date'].apply(lambda date: date.date())
     labels_df.sort_values(['symbol', 'date'], inplace=True)
     labels_df['future_price'] = labels_df.groupby('symbol')['close'].shift(-77)
@@ -82,7 +87,7 @@ def get_labels(symbols):
     return labels_df
 
 
-def split_data(features_df, labels_df, merge_on_date=True):
+def split_data(features_df, labels_df, days=28):
     """
     Split data into training and prediction sets
     Args:
@@ -94,7 +99,7 @@ def split_data(features_df, labels_df, merge_on_date=True):
     logging.info('Splitting data into training and prediction sets...')
     data_df = features_df.merge(labels_df, how='left', on=['date'])
     data_df.dropna(subset=['label'], inplace=True)
-    data_df['date'] = data_df['date'] + timedelta(days=28)
+    data_df['date'] = data_df['date'] + timedelta(days=days)
     today = datetime.now().date()
     train_df = data_df[data_df['date'] <= today]
     predict_df = data_df[data_df['date'] > today]
@@ -150,6 +155,8 @@ def preprocess_data(df):
 
 from tensorflow.keras.layers import Dropout
 
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
 
 def define_and_train_model(X_train, y_train, X_val, y_val):
     """
@@ -164,21 +171,27 @@ def define_and_train_model(X_train, y_train, X_val, y_val):
     """
     logging.info('Defining the LSTM model...')
     model = Sequential()
-    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]),
-                   return_sequences=True))
-    model.add(Dropout(0.2))  # Dropout layer added here
-    model.add(LSTM(X_train.shape[2] // 2, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]),
-                   return_sequences=True))
+    model.add(Dense(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
+    model.add(Dropout(0.1))  # Dropout layer added here
+    model.add(Dense(X_train.shape[2] // 2, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
+    model.add(Dropout(0.1))  # Another dropout layer added here
     model.add(Dense(1, activation='sigmoid'))
 
     # Compile the model
-    model.compile(optimizer=Adam(learning_rate=0.00001),
+    model.compile(optimizer=Adam(learning_rate=0.001),
                   loss='binary_crossentropy',
                   metrics=['accuracy'])
 
+    # Define EarlyStopping callback
+    early_stopping = EarlyStopping(monitor='val_accuracy', patience=50, restore_best_weights=True)
+
+    # Define ModelCheckpoint callback
+    model_checkpoint = ModelCheckpoint('best_model.h5', monitor='val_accuracy', save_best_only=True, mode='max')
+
     # Fit the model
     logging.info('Training the model...')
-    model.fit(X_train, y_train, epochs=25, validation_data=(X_val, y_val))
+    model.fit(X_train, y_train, epochs=500, validation_data=(X_val, y_val),
+              callbacks=[early_stopping, model_checkpoint])
     logging.info('Model training completed.')
     return model
 
@@ -205,7 +218,6 @@ def predict(model, predict_data, train_columns, scaler):
 
     # Ensure the order of column in the test data is in the same order than in train set
     predict_data = predict_data[train_columns]
-    print(predict_data)
 
     predict_data = scaler.transform(predict_data)
     predict_data = np.expand_dims(predict_data, axis=1)
@@ -215,14 +227,34 @@ def predict(model, predict_data, train_columns, scaler):
     return predictions
 
 
-def store_predictions(predictions_df):
+from hashlib import sha256
+from time import time
+
+
+def generate_model_id(model_name):
+    """
+    Generate a unique id for a given model name
+    Args:
+    model_name (str): Name of the model
+    Returns:
+    str: Unique ID for the model
+    """
+    current_time = str(time())
+    model_id = sha256((model_name + current_time).encode()).hexdigest()
+    return model_id
+
+
+def store_predictions(predictions_df, model_id):
     """
     Store model predictions in the database
     Args:
     predictions_df (DataFrame): DataFrame with model predictions
+    model_id (str): ID of the model used for the predictions
     """
     logging.info('Storing model predictions...')
-    db_connector.insert_dataframe(predictions_df, 'model_predictions')
+    predictions_df['model_id'] = model_id
+    db_connector.insert_dataframe(predictions_df, name='model_predictions', if_exists='append', schema='fred_raw',
+                                  index=False)
     logging.info('Model predictions stored successfully.')
 
 
@@ -234,33 +266,35 @@ def store_metrics(metrics, model_name):
     model_name (str): Name of the model
     """
     logging.info('Storing model metrics...')
+    model_id = generate_model_id(model_name)
     metrics_df = pd.DataFrame({
         'date': [datetime.now()],
+        'model_id': [model_id],
         'model_name': [model_name],
-        'accuracy': [metrics['accuracy']],
-        'loss': [metrics['loss']]
+        'accuracy': [metrics[1]],
+        'loss': [metrics[0]]
     })
-    db_connector.insert_dataframe(metrics_df, 'model_metrics')
+    db_connector.insert_dataframe(metrics_df, name='model_metrics', if_exists='append', schema='fred_raw',
+                                  index=False)
     logging.info('Model metrics stored successfully.')
+    return model_id
 
 
 # Execute the process
-table_names = ['economic', 'energy', 'treasury']
+table_names = db_connector.run_query('''SELECT table_name 
+FROM information_schema.tables WHERE table_schema = 'fred_raw' 
+and table_name not in ('endpoints', 'historical_prices', 'model_metrics', 'model_predictions')''')['table_name']
+
 dfs = get_data_from_tables(table_names)
 features_df = align_dates(dfs, 'date')
-labels_df = get_labels(symbols=('VT', 'VTI', 'VYM', 'SPHD', 'IWV', 'ITOT', 'ACWI', 'SCHB', 'FNDB', 'VXUS',
-                                'VTHR', 'DIA', 'RSP',
-                                'IOO', 'IVV', 'SPY', 'VOO', 'SHE', 'VOO', 'IWM', 'OEF', 'QQQ',
-                                'CVY', 'RPG', 'RPV', 'IWB', 'IWF', 'IWD', 'IVV', 'IVW', 'IVE', 'PKW', 'PRF', 'SPLV',
-                                'SCHX',
-                                'SCHG', 'SCHV', 'SCHD', 'FNDX', 'SDY', 'VOO', 'VOOG', 'VOOV', 'VV', 'VUG', 'VTV',
-                                'MGC'))
-train_df, predict_df, closing_price_df = split_data(features_df, labels_df, merge_on_date=False)
+labels_df = get_labels()
+train_df, predict_df, closing_price_df = split_data(features_df, labels_df)
 
 train_data, train_labels, scaler, columns = preprocess_data(train_df)
 
 # Split training data into training and validation
-X_train, X_val, y_train, y_val = train_test_split(train_data, train_labels, test_size=0.2, shuffle=False)
+X_train, X_val, y_train, y_val = train_test_split(train_data, train_labels, test_size=0.3, shuffle=True)
+
 # Train the model
 model = define_and_train_model(X_train, y_train, X_val, y_val)
 
@@ -269,17 +303,18 @@ predictions = predict(model, predict_df, columns, scaler)
 
 # Create a DataFrame with symbols, corresponding predictions, and closing price at prediction
 result_df = pd.DataFrame({
+    'model_id': 0,
     'symbol': predict_df['symbol'].to_list(),
     'prediction': predictions.flatten()
 })
 
 result_df = result_df.merge(closing_price_df, on='symbol', how='left')
 
-# Store the predictions
-store_predictions(result_df)
-
 # Fetch model metrics
 metrics = model.evaluate(X_val, y_val)
 
 # Store the metrics
-store_metrics(metrics, 'my_lstm_model')
+model_id = store_metrics(metrics, 'incomplete_etf_model')
+
+# Store the predictions
+store_predictions(result_df, model_id)
