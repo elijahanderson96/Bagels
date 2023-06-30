@@ -183,7 +183,7 @@ class PostgresDB:
             cur.copy_expert(sql=sql, file=s_buf)
 
 
-db_connector = PostgresDB(host='172.18.144.1',
+db_connector = PostgresDB(host='172.21.64.1',
                           user='elijah',
                           dbname='market_data',
                           port='5432',

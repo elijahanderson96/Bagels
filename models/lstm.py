@@ -1,16 +1,25 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 from functools import reduce
+from hashlib import sha256
+from time import time
 
 import numpy as np
 import pandas as pd
+import yfinance as yf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.layers import Dense, LSTM
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dropout
+from tensorflow.keras.layers import LSTM
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
 from database import db_connector
+from one_time_sql_scripts.ingestion_fred import data_refresh
 
 # Setting up logging
 logging.basicConfig(level=logging.INFO)
@@ -27,19 +36,16 @@ def get_data_from_tables(table_names):
     logging.info('Fetching data from tables...')
     db_connector.connect()
 
-    dfs = [db_connector.run_query(f'SELECT * FROM fred_raw.{table}')
-           for table in table_names]
+    dataframes = [db_connector.run_query(f'SELECT * FROM fred_raw.{table}') for table in table_names]
 
-    dfs = [df.drop(axis=1, labels=['endpoint_id']) for df in dfs]
-
-    for i, df in enumerate(dfs):
-        dfs[i] = df.rename(columns={'value': table_names[i]})
+    for i, df in enumerate(dataframes):
+        dataframes[i] = df.rename(columns={'value': table_names[i]})
 
     logging.info('Data fetched successfully.')
-    return dfs
+    return dataframes
 
 
-def align_dates(df_list, date_column):
+def align_dates(df_list, date_column, days=28):
     """
     Align dates across different dataframes in the list
     Args:
@@ -65,62 +71,83 @@ def align_dates(df_list, date_column):
     drop_columns = ['date', 'symbol'] if 'symbol' in df_final.columns else ['date']
     df_final.drop_duplicates(inplace=True, subset=drop_columns)
     logging.info('Date alignment completed.')
+    df_final['date'] = df_final['date'] + timedelta(days=days)
     return df_final
 
 
-def get_labels():
+def get_shift_amount(days=28):
+    """Calculate the shift amount for weekdays."""
+    shift_amount = days // 7 * 5 + min(days % 7, 5)
+    return shift_amount
+
+
+def get_labels(days=28):
     """
     Fetch labels from the database and generate binary labels
     Returns:
     DataFrame: DataFrame with binary labels and closing price at prediction
     """
     logging.info('Fetching and processing labels...')
-    labels_df = db_connector.run_query('SELECT symbol, date, close'
-                                       ' FROM fred_raw.historical_prices ')
-    labels_df['date'] = labels_df['date'].apply(lambda date: date.date())
-    labels_df.sort_values(['symbol', 'date'], inplace=True)
-    labels_df['future_price'] = labels_df.groupby('symbol')['close'].shift(-77)
-    labels_df['price_change'] = labels_df['future_price'] - labels_df['close']
-    labels_df['label'] = (labels_df['price_change'] > 0).astype(int)
-    labels_df.rename(columns={'close': 'closing_price_at_prediction'}, inplace=True)
+    labels = db_connector.run_query(
+        'SELECT SYMBOL, DATE, CLOSE '
+        'FROM FRED_RAW.HISTORICAL_PRICES '
+    )
+    labels['date'] = labels['date'].apply(lambda date: date.date())
+    labels.set_index('date', inplace=True)
+    labels.sort_index(inplace=True)
+    shift_amount = get_shift_amount(days)
+    labels['future_price'] = labels.groupby('symbol')['close'].shift(-shift_amount)
+    labels['price_change'] = labels['future_price'] - labels['close']
+    labels['label'] = (labels['price_change'] > 0).astype(int)
+    labels.rename(columns={'close': 'closing_price_at_prediction'}, inplace=True)
     logging.info('Label processing completed.')
-    return labels_df
+    labels.reset_index(inplace=True)
+    labels['date'] = labels['date'] + timedelta(days=days)
+    return labels
 
 
-def split_data(features_df, labels_df, days=28):
+def split_data(features_df, labels_df, backtest=False, cutoff_date=None, days=28):
     """
     Split data into training and prediction sets
     Args:
     features_df (DataFrame): DataFrame with features
     labels_df (DataFrame): DataFrame with labels
+    backtest (bool): If true, cutoff_date must be set. Splits data into training and backtest sets.
+    cutoff_date (str): The cutoff date for backtest. The format should be 'yyyy-mm-dd'.
     Returns:
     Tuple: train_data, test_data, and closing_price_at_prediction DataFrames
     """
     logging.info('Splitting data into training and prediction sets...')
     data_df = features_df.merge(labels_df, how='left', on=['date'])
     data_df.dropna(subset=['label'], inplace=True)
-    data_df['date'] = data_df['date'] + timedelta(days=days)
-    today = datetime.now().date()
-    train_df = data_df[data_df['date'] <= today]
-    predict_df = data_df[data_df['date'] > today]
+    data_df['date'] = pd.to_datetime(data_df['date'])
+
+    if backtest:
+        if cutoff_date is None:
+            raise ValueError("When backtest=True, you must provide a valid cutoff_date.")
+
+        cutoff_date = pd.to_datetime(cutoff_date)
+
+        train_df = data_df[data_df['date'] <= cutoff_date]
+        predict_df = data_df[data_df['date'] == cutoff_date + timedelta(days=days)]
+
+    else:
+        today = pd.to_datetime(datetime.now().date())
+        train_df = data_df[data_df['date'] <= today]
+        predict_df = data_df[data_df['date'] == today + timedelta(days=days - 1)]
+
     train_df = train_df.drop(columns=['future_price', 'price_change', 'closing_price_at_prediction'])
-    closing_price_at_prediction = predict_df[['symbol', 'date', 'closing_price_at_prediction']]
-    predict_df = predict_df.drop(columns=['future_price', 'price_change', 'closing_price_at_prediction'])
-    # Convert 'date' column to pandas datetime, if it's not already
+    train_df.drop_duplicates(inplace=True, subset=['symbol', 'date'])
+
     predict_df['date'] = pd.to_datetime(predict_df['date'])
-    # only taking max date
-    idx = predict_df.groupby('symbol')['date'].idxmax()
-    predict_df = predict_df.loc[idx]
     predict_df.drop_duplicates(inplace=True, subset=['symbol', 'date'])
 
-    # only taking max date
+    closing_price_at_prediction = predict_df[['symbol', 'date', 'closing_price_at_prediction']]
+    predict_df = predict_df.drop(columns=['future_price', 'price_change', 'closing_price_at_prediction'])
     closing_price_at_prediction['date'] = pd.to_datetime(closing_price_at_prediction['date'])
-
-    idx = closing_price_at_prediction.groupby('symbol')['date'].idxmax()
-    closing_price_at_prediction = closing_price_at_prediction.loc[idx]
     closing_price_at_prediction.drop_duplicates(inplace=True, subset=['symbol', 'date'])
-
     logging.info('Data split completed.')
+
     return train_df, predict_df, closing_price_at_prediction
 
 
@@ -128,10 +155,10 @@ def preprocess_data(df):
     """
     Preprocesses the data for LSTM
     Args:
-    df (DataFrame): DataFrame to preprocess
-    is_train (bool): True if the df is training data (includes labels)
+        df (DataFrame): DataFrame to preprocess
+        is_train (bool): True if the df is training data (includes labels)
     Returns:
-    Tuple: Processed data, and labels if is_train=True
+        Tuple: Processed data, and labels if is_train=True
     """
     logging.info('Preprocessing data...')
     df = df.set_index('date')
@@ -153,48 +180,48 @@ def preprocess_data(df):
     return data, labels, scaler, training_columns
 
 
-from tensorflow.keras.layers import Dropout
-
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-
-
-def define_and_train_model(X_train, y_train, X_val, y_val):
+def define_and_train_model(X_train, y_train):
     """
     Define and train LSTM model
     Args:
-    X_train (ndarray): Training data
-    y_train (Series): Training labels
-    X_val (ndarray): Test data
-    y_val (Series): Test labels
+        X_train (ndarray): Training data
+        y_train (Series): Training labels
     Returns:
-    Sequential: Trained model
+        Sequential: Trained model
     """
-    logging.info('Defining the LSTM model...')
+    logging.info('Defining the model...')
     model = Sequential()
-    model.add(Dense(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
-    model.add(Dropout(0.1))  # Dropout layer added here
-    model.add(Dense(X_train.shape[2] // 2, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
-    model.add(Dropout(0.1))  # Another dropout layer added here
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+    model.add(LSTM(X_train.shape[2], activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
     model.add(Dense(1, activation='sigmoid'))
 
     # Compile the model
-    model.compile(optimizer=Adam(learning_rate=0.001),
-                  loss='binary_crossentropy',
-                  metrics=['accuracy'])
+    model.compile(
+        optimizer=Adam(learning_rate=0.0005),
+        loss='binary_crossentropy',
+        metrics=['accuracy']
+    )
 
     # Define EarlyStopping callback
-    early_stopping = EarlyStopping(monitor='val_accuracy', patience=50, restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='accuracy', patience=50, restore_best_weights=True)
 
     # Define ModelCheckpoint callback
-    model_checkpoint = ModelCheckpoint('best_model.h5', monitor='val_accuracy', save_best_only=True, mode='max')
+    model_checkpoint = ModelCheckpoint('best_model.h5', monitor='accuracy', save_best_only=True, mode='max')
 
     # Fit the model
     logging.info('Training the model...')
-    model.fit(X_train, y_train, epochs=500, validation_data=(X_val, y_val),
-              callbacks=[early_stopping, model_checkpoint])
+    model.fit(
+        X_train, y_train, epochs=100,
+        callbacks=[early_stopping, model_checkpoint]
+    )
     logging.info('Model training completed.')
     return model
-
 
 def predict(model, predict_data, train_columns, scaler):
     """
@@ -227,10 +254,6 @@ def predict(model, predict_data, train_columns, scaler):
     return predictions
 
 
-from hashlib import sha256
-from time import time
-
-
 def generate_model_id(model_name):
     """
     Generate a unique id for a given model name
@@ -253,8 +276,8 @@ def store_predictions(predictions_df, model_id):
     """
     logging.info('Storing model predictions...')
     predictions_df['model_id'] = model_id
-    db_connector.insert_dataframe(predictions_df, name='model_predictions', if_exists='append', schema='fred_raw',
-                                  index=False)
+    kwargs = {'name': 'model_predictions', 'if_exists': 'append', 'schema': 'fred_raw', 'index': False}
+    db_connector.insert_dataframe(predictions_df, **kwargs)
     logging.info('Model predictions stored successfully.')
 
 
@@ -267,54 +290,118 @@ def store_metrics(metrics, model_name):
     """
     logging.info('Storing model metrics...')
     model_id = generate_model_id(model_name)
-    metrics_df = pd.DataFrame({
-        'date': [datetime.now()],
-        'model_id': [model_id],
-        'model_name': [model_name],
-        'accuracy': [metrics[1]],
-        'loss': [metrics[0]]
-    })
-    db_connector.insert_dataframe(metrics_df, name='model_metrics', if_exists='append', schema='fred_raw',
-                                  index=False)
+    metrics_df = pd.DataFrame(
+        {
+            'date': [datetime.now()],
+            'model_id': [model_id],
+            'model_name': [model_name],
+            'accuracy': [metrics[1]],
+            'loss': [metrics[0]]
+        }
+    )
+    db_connector.insert_dataframe(metrics_df, name='model_metrics', if_exists='append', schema='fred_raw', index=False)
     logging.info('Model metrics stored successfully.')
     return model_id
 
 
-# Execute the process
-table_names = db_connector.run_query('''SELECT table_name 
-FROM information_schema.tables WHERE table_schema = 'fred_raw' 
-and table_name not in ('endpoints', 'historical_prices', 'model_metrics', 'model_predictions')''')['table_name']
+def get_current_price(symbol):
+    """
+    Fetch the latest stock price for a given symbol
 
-dfs = get_data_from_tables(table_names)
-features_df = align_dates(dfs, 'date')
-labels_df = get_labels()
-train_df, predict_df, closing_price_df = split_data(features_df, labels_df)
+    Args:
+        symbol (str): The stock symbol
+    Returns:
+        float: The current stock price
+    """
+    ticker = yf.Ticker(symbol)
+    todays_data = ticker.history(period='1d')
+    return todays_data['Close'][0]
+
+
+def classify_stocks(predictions_df):
+    """
+    Classify stocks as overvalued or undervalued based on their current price and the predicted price
+
+    Args:
+        predictions_df (DataFrame): DataFrame with model predictions
+    Returns:
+        DataFrame: DataFrame with added 'classification' column
+    """
+    # Add new columns for current price and classification
+    predictions_df['current_price'] = predictions_df['symbol'].apply(get_current_price)
+    predictions_df['classification'] = 'fair'
+
+    # Classify as overvalued or undervalued based on model prediction
+    predictions_df.loc[(predictions_df['prediction'] <= .5) & (predictions_df['current_price'] > predictions_df[
+        'closing_price_at_prediction']), 'classification'] = 'overvalued'
+
+    predictions_df.loc[(predictions_df['prediction'] > .5) & (predictions_df['current_price'] < predictions_df[
+        'closing_price_at_prediction']), 'classification'] = 'undervalued'
+
+    return predictions_df
+
+
+# Create up to date data
+#data_refresh()
+
+# Execute the process
+tables = db_connector.run_query(
+    '''SELECT TABLE_NAME 
+       FROM INFORMATION_SCHEMA.TABLES 
+       WHERE TABLE_SCHEMA = 'fred_raw' 
+       AND TABLE_NAME NOT IN ('endpoints', 'historical_prices', 
+       'model_metrics', 'model_predictions')'''
+)['table_name']
+
+dfs = get_data_from_tables(tables)
+forecast_n_days_in_advance = 14
+
+features_df = align_dates(dfs, 'date', days=forecast_n_days_in_advance)
+labels_df = get_labels(days=forecast_n_days_in_advance)
+
+# For backtesting
+backtest = False
+cutoff_date = '2023-02-22'
+
+train_df, predict_df, closing_price_df = split_data(features_df,
+                                                    labels_df,
+                                                    backtest,
+                                                    cutoff_date,
+                                                    days=forecast_n_days_in_advance)
+
+train_df.drop_duplicates(inplace=True, subset=['symbol', 'date'])
 
 train_data, train_labels, scaler, columns = preprocess_data(train_df)
 
 # Split training data into training and validation
-X_train, X_val, y_train, y_val = train_test_split(train_data, train_labels, test_size=0.3, shuffle=True)
+#X_train, X_val, y_train, y_val = train_test_split(train_data, train_labels, test_size=0.001, shuffle=False)
+
+# Preprocess data
+#train_data, train_labels, scaler, columns = preprocess_data(train_df)
 
 # Train the model
-model = define_and_train_model(X_train, y_train, X_val, y_val)
+model = define_and_train_model(train_data, train_labels)
 
 # Generate predictions
 predictions = predict(model, predict_df, columns, scaler)
 
 # Create a DataFrame with symbols, corresponding predictions, and closing price at prediction
-result_df = pd.DataFrame({
-    'model_id': 0,
-    'symbol': predict_df['symbol'].to_list(),
-    'prediction': predictions.flatten()
-})
+result_df = pd.DataFrame(
+    {
+        'symbol': predict_df['symbol'].to_list(),
+        'prediction': predictions.flatten()
+    }
+)
 
 result_df = result_df.merge(closing_price_df, on='symbol', how='left')
 
+result_df = classify_stocks(result_df)
+
 # Fetch model metrics
-metrics = model.evaluate(X_val, y_val)
+#metrics = model.evaluate(X_val, y_val)
 
 # Store the metrics
-model_id = store_metrics(metrics, 'incomplete_etf_model')
+#model_id = store_metrics(metrics, 'incomplete_etf_model')
 
 # Store the predictions
-store_predictions(result_df, model_id)
+#store_predictions(result_df, model_id)
