@@ -83,13 +83,14 @@ def data_refresh(api_key: str) -> None:
                 'id': range(0, len(endpoints)), 'endpoint': endpoints.keys(),
                 'value': endpoints.values()
             }
-            )
+        )
         db_kwargs = {'schema': 'fred_raw', 'name': 'endpoints', 'if_exists': 'replace', 'index': False}
         db_connector.insert_dataframe(metadata, **db_kwargs)
 
         for endpoint in endpoints.keys():
             logger.info(f'Grabbing {endpoint}.')
             series = fetch_data(fred, endpoint)
+            db_kwargs['name'] = endpoint.lower()
             db_connector.insert_dataframe(series, **db_kwargs)
 
         dfs = []

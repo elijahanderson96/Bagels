@@ -1,15 +1,20 @@
 import csv
 import logging
 from io import StringIO
+from typing import Any
 from typing import Dict, List, Optional
+from typing import Tuple
+from typing import Union
 
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
+from psycopg2.sql import Composed
 from sqlalchemy import create_engine
+from sqlalchemy import inspect
 
 
-class PostgresDB:
+class PostgreSQLConnector:
     """
     A class used to manage a PostgreSQL database.
 
@@ -88,128 +93,166 @@ class PostgresDB:
             self.conn.close()
             self.logger.info("Connection closed")
 
-    def run_query(self, query: str, params: Optional[Dict] = None) -> pd.DataFrame:
+    def run_query(
+            self, query: Union[str, Composed], params: Optional[Tuple] = None, return_df: bool = True,
+            fetch_one: bool = False
+    ) -> Optional[Union[pd.DataFrame, Any]]:
         """
-        Runs a SQL query on the database.
+        Execute a query on the database.
 
         Args:
-            query (str): The SQL query to execute.
-            params (Optional[Dict]): Optional parameters for the SQL query.
+            query (Union[str, Composed]): SQL query as a string or psycopg2 Composed object.
+            params (Optional[Tuple], optional): Tuple of parameters to use in the query. Defaults to None.
+            return_df (bool, optional): Whether to return the results as a pandas DataFrame.
+                                        Defaults to True. If False, None is returned.
+            fetch_one (bool, optional): Whether to return a single value.
+                                        Defaults to False. If True, returns a single value from the query result.
 
         Returns:
-            pd.DataFrame: A DataFrame with the results of the query.
+            Optional[Union[pd.DataFrame, Any]]: Result of the query as a pandas DataFrame, if return_df is True and
+            the query
+            retrieves data. Otherwise, None is returned. If fetch_one is True, returns a single value from the query
+            result.
         """
-        with self.conn.cursor() as cur:
-            try:
+        try:
+            with self.conn.cursor() as cur:
                 cur.execute(query, params)
-                if query.lower().startswith("select"):
+                if fetch_one:
+                    data = cur.fetchone()
+                    self.conn.commit()
+                    return data[0] if data else None
+                elif return_df:
                     data = cur.fetchall()
-                    column_names = [desc[0] for desc in cur.description]
-                    df = pd.DataFrame(data, columns=column_names)
-                    self.logger.info(f'Returned dataframe of shape: {df.shape[0]} x {df.shape[1]}')
-                    return df
+                    colnames = [desc[0] for desc in cur.description]
+                    return pd.DataFrame(data, columns=colnames)
                 else:
                     self.conn.commit()
-                    self.logger.info("Query executed successfully")
-            except Exception as e:
-                self.logger.error(f"Error executing query: {e}")
+                    return None
+        except Exception as e:
+            self.logger.error(f'Error occurred while executing query: {e}')
+            raise e
 
-    def create_table(self, table_name: str, columns: Dict[str, str]):
+    def create_table(self, table_name: str, columns: Dict[str, str], schema: str = 'public') -> None:
         """
-        Create a new table in the database.
+        Create a table in a specified schema.
 
         Args:
-            table_name (str): The name of the table to create.
-            columns (Dict[str, str]): A dictionary with column names and their data types.
-        """
-        with self.conn.cursor() as cur:
-            try:
-                columns_sql = ", ".join([f"{col} {data_type}" for col, data_type in columns.items()])
-                create_table_query = sql.SQL("CREATE TABLE {} ({});").format(
-                    sql.Identifier(table_name),
-                    sql.SQL(columns_sql)
-                )
-                cur.execute(create_table_query)
-                self.conn.commit()
-                self.logger.info(f"Table '{table_name}' created successfully")
-            except Exception as e:
-                self.logger.error(f"Error creating table: {e}")
+            table_name (str): Table name.
+            columns (Dict[str, str]): Dictionary with column names as keys and data types as values.
+            schema (str, optional): The schema in which to create the table. Defaults to 'public'.
 
-    def add_primary_key(self, table_name: str, column: str, constraint_name: Optional[str] = None):
+        Examples:
+            connector.create_table('users', {'id': 'SERIAL', 'name': 'VARCHAR(100)', 'email': 'VARCHAR(100)'},
+            'myschema')
         """
-        Add primary key to the table.
+        try:
+            query = sql.SQL('CREATE TABLE IF NOT EXISTS {}.{} ({})').format(
+                sql.Identifier(schema),
+                sql.Identifier(table_name),
+                sql.SQL(', ').join(
+                    sql.SQL('{} {}').format(
+                        sql.Identifier(column), sql.SQL(data_type)
+                    ) for column, data_type in columns.items()
+                )
+            )
+            self.run_query(query, return_df=False)
+            self.logger.info(f'Table {table_name} created successfully in schema {schema}.')
+        except Exception as e:
+            self.logger.error(f'Error occurred while creating table: {e}')
+            raise e
+
+    def table_exists(self, table_name: str, schema: str = 'public') -> bool:
+        """
+        Checks if a table exists in a specified schema.
 
         Args:
-            table_name (str): The name of the table to modify.
-            column (str): The column to set as primary key.
-            constraint_name (Optional[str]): The name of the constraint. Defaults to "{table_name}_pkey".
+            table_name (str): Table name.
+            schema (str, optional): The schema in which the table resides. Defaults to 'public'.
+
+        Returns:
+            bool: True if the table exists, False otherwise.
         """
-        with self.conn.cursor() as cur:
-            try:
-                if constraint_name is None:
-                    constraint_name = f"{table_name}_pkey"
-                query = sql.SQL("ALTER TABLE {} ADD CONSTRAINT {} PRIMARY KEY ({});").format(
-                    sql.Identifier(table_name),
-                    sql.Identifier(constraint_name),
-                    sql.Identifier(column)
-                )
-                cur.execute(query)
-                self.conn.commit()
-                self.logger.info(f"Primary key added to '{table_name}' successfully")
-            except Exception as e:
-                self.logger.error(f"Error adding primary key to table: {e}")
+        engine = self.create_engine()
+        inspector = inspect(engine)
+        return table_name in inspector.get_table_names(schema=schema)
 
-    # Continue in a similar manner for other methods...
+    def add_primary_key(self, table_name: str, column_name: str, schema: str = 'public') -> None:
+        """
+        Add a primary key to a table.
 
-    def modify_table(self, table_name, schema_name, action, **kwargs):
-        with self.conn.cursor() as cur:
-            try:
-                if action == "add_primary_key":
-                    column = kwargs.get("column")
-                    constraint_name = kwargs.get("constraint_name", f"{table_name}_pkey")
-                    query = sql.SQL("ALTER TABLE {}.{} ADD CONSTRAINT {} PRIMARY KEY ({});").format(
-                        sql.Identifier(schema_name),
-                        sql.Identifier(table_name),
-                        sql.Identifier(constraint_name),
-                        sql.Identifier(column)
-                    )
-                elif action == "add_unique_key":
-                    columns = kwargs.get("columns")
-                    constraint_name = kwargs.get("constraint_name", f"{table_name}_unique")
-                    query = sql.SQL("ALTER TABLE {}.{} ADD CONSTRAINT {} UNIQUE ({});").format(
-                        sql.Identifier(schema_name),
-                        sql.Identifier(table_name),
-                        sql.Identifier(constraint_name),
-                        sql.SQL(", ").join([sql.Identifier(col) for col in columns])
-                    )
-                elif action == "add_foreign_key":
-                    column = kwargs.get("column")
-                    reference_table = kwargs.get("reference_table")
-                    reference_column = kwargs.get("reference_column")
-                    constraint_name = kwargs.get("constraint_name", f"{table_name}_fk")
-                    query = sql.SQL("ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({});").format(
-                        sql.Identifier(table_name),
-                        sql.Identifier(constraint_name),
-                        sql.Identifier(column),
-                        sql.Identifier(reference_table),
-                        sql.Identifier(reference_column)
-                    )
-                elif action == "add_sequence":
-                    column = kwargs.get("column")
-                    sequence_name = kwargs.get("sequence_name", f"{table_name}_{column}_seq")
-                    query = sql.SQL("ALTER TABLE {} ALTER COLUMN {} SET DEFAULT nextval('{}');").format(
-                        sql.Identifier(table_name),
-                        sql.Identifier(column),
-                        sql.Identifier(sequence_name)
-                    )
-                else:
-                    raise ValueError("Invalid action")
+        Args:
+            table_name (str): Table name.
+            column_name (str): Column name.
+            schema (str, optional): The schema in which the table resides. Defaults to 'public'.
 
-                cur.execute(query)
-                self.conn.commit()
-                print(f"Table '{table_name}' modified successfully")
-            except Exception as e:
-                print("Error modifying table: ", e)
+        Examples:
+            >> connector.add_primary_key('users', 'id', 'myschema')
+        """
+        query = sql.SQL('ALTER TABLE {schema}.{table} ADD PRIMARY KEY ({column})').format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table_name),
+            column=sql.Identifier(column_name)
+        )
+        self.run_query(query, return_df=False)
+
+    def add_foreign_key(self, table_name: str, column_name: str, ref_table: str, ref_column: str,
+                        schema: str = 'public') -> None:
+        """
+        Add a foreign key to a table.
+
+        Args:
+            table_name (str): Table name.
+            column_name (str): Column name.
+            ref_table (str): Referenced table name.
+            ref_column (str): Referenced column name.
+            schema (str, optional): The schema in which the table resides. Defaults to 'public'.
+
+        Examples:
+            >> connector.add_foreign_key('orders', 'user_id', 'users', 'id', 'myschema')
+        """
+        query = sql.SQL(
+            'ALTER TABLE {schema}.{table} ADD FOREIGN KEY ({column}) REFERENCES {schema}.{ref_table} ({ref_column})').format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table_name),
+            column=sql.Identifier(column_name),
+            ref_table=sql.Identifier(ref_table),
+            ref_column=sql.Identifier(ref_column)
+        )
+        self.run_query(query, return_df=False)
+
+    def add_unique_key(self, table_name: str, columns: List[str], constraint_name: str, schema: str = 'public') -> None:
+        """
+        Add a unique constraint to a table.
+
+        Args:
+            table_name (str): Table name.
+            columns (List[str]): List of column names that compose the unique key.
+            constraint_name (str): Name of the unique constraint.
+            schema (str, optional): The schema in which the table resides. Defaults to 'public'.
+
+        Example:
+            >> connector.add_unique_key('models', ['date_trained', 'features', 'symbol', 'days_forecast'],
+            'models_unique_key', 'myschema')
+
+        Raises:
+            Exception: If an error occurs while adding the unique key.
+        """
+        try:
+            query = sql.SQL(
+                'ALTER TABLE {}.{} ADD CONSTRAINT {} UNIQUE ({})'
+            ).format(
+                sql.Identifier(schema),
+                sql.Identifier(table_name),
+                sql.Identifier(constraint_name),
+                sql.SQL(', ').join(map(sql.Identifier, columns))
+            )
+            self.run_query(query, return_df=False)
+            self.logger.info(
+                f'Unique key {constraint_name} added successfully to table {table_name} in schema {schema}.'
+            )
+        except Exception as e:
+            self.logger.error(f'Error occurred while adding unique key: {e}')
+            raise e
 
     def create_engine(self):
         return create_engine(f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}")
@@ -242,9 +285,42 @@ class PostgresDB:
                 table_name, columns)
             cur.copy_expert(sql=sql, file=s_buf)
 
+    def insert_and_return_id(
+            self, table_name: str, columns: Dict[str, Any], schema: str = 'public'
+    ) -> int:
+        """
+        Insert a row into a specified table and return the generated id.
 
-db_connector = PostgresDB(host='172.21.64.1',
-                          user='elijah',
-                          dbname='market_data',
-                          port='5432',
-                          password='Poodle!3')
+        Args:
+            table_name (str): Table name.
+            columns (Dict[str, Any]): Dictionary with column names as keys and data to be inserted as values.
+            schema (str, optional): The schema in which the table resides. Defaults to 'public'.
+
+        Returns:
+            int: The id of the row that was inserted.
+
+        Examples:
+            >> connector.insert_and_return_id('users', {'name': 'John', 'email': 'john@example.com'}, 'myschema')
+        """
+        query = sql.SQL(
+            'INSERT INTO {}.{} ({}) VALUES ({}) RETURNING id'
+        ).format(
+            sql.Identifier(schema),
+            sql.Identifier(table_name),
+            sql.SQL(', ').join(map(sql.Identifier, columns.keys())),
+            sql.SQL(', ').join(sql.Placeholder() * len(columns))
+        )
+        params = tuple(columns.values())
+        print(query)
+        print(params)
+        return self.run_query(query, params=params, return_df=False, fetch_one=True)
+
+
+
+db_connector = PostgreSQLConnector(
+    host='172.18.240.1',
+    user='elijah',
+    dbname='market_data',
+    port='5432',
+    password='Poodle!3'
+)
