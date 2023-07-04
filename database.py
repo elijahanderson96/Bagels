@@ -117,6 +117,8 @@ class PostgreSQLConnector:
         try:
             with self.conn.cursor() as cur:
                 cur.execute(query, params)
+                self.conn.commit()  # Commit changes here
+
                 if fetch_one:
                     data = cur.fetchone()
                     self.conn.commit()
@@ -316,7 +318,6 @@ class PostgreSQLConnector:
         return self.run_query(query, params=params, return_df=False, fetch_one=True)
 
 
-
 db_connector = PostgreSQLConnector(
     host='172.18.240.1',
     user='elijah',
@@ -324,3 +325,5 @@ db_connector = PostgreSQLConnector(
     port='5432',
     password='Poodle!3'
 )
+
+

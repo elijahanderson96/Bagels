@@ -1,7 +1,32 @@
-version: "3.9"
+version: '3.9'
 services:
-  model:
-    build: .
-    volumes:
-      - .:/src
+  postgres:
+    image: postgres:latest
+    env_file:
+      - postgres.env
 
+
+  webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: [ "/bin/bash", "-c" ]
+    command: >
+      bash -c "airflow db init &&
+      airflow users create --role Admin --username admin --password admin --email admin@example.com &&
+      airflow webserver"
+    env_file:
+      - airflow.env
+    depends_on:
+      - postgres
+    ports:
+      - 8080:8080
+
+  scheduler:
+    build: .
+    restart: always
+    depends_on:
+      - webserver
+    volumes:
+      - ./dags:/usr/local/airflow/dags
+    command: scheduler

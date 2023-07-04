@@ -1,19 +1,15 @@
-# start from NVIDIA's TensorFlow GPU image
-FROM tensorflow/tensorflow:latest-gpu
+# Use official base image of Python
+FROM python:3.11
 
-# set the working directory
+# Set the working directory
 WORKDIR /app
 
-# copy the requirements file
-COPY requirements.txt ./requirements.txt
+# Install the cronjob and Airflow
+RUN apt-get update && apt-get install -y cron && pip install apache-airflow
 
-# install the requirements
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Copy the current directory contents into the container at /app
+ADD . /app
 
-COPY ./etf_predictor.py /app/
-COPY ./database.py /app/
-COPY ./pipeline_metadata.yml /app
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ./scripts /app/scripts
-# set the default command to execute the Python script
-CMD ["python3", "etf_predictor.py"]
