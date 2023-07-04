@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from datetime import timedelta
 from functools import reduce
+from scripts.ingestion_fred import etfs, endpoints
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.layers import Dense
@@ -15,7 +16,6 @@ from typing import List
 from typing import Tuple
 
 from database import db_connector
-from one_time_sql_scripts.ingestion_fred import etfs
 
 # Setting up logging
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -185,12 +185,8 @@ def preprocess_data(df: pd.DataFrame) -> Tuple[np.ndarray, pd.Series, MinMaxScal
         return data, labels, scaler, training_columns
 
 
-def define_and_train_model(
-        X_train: np.ndarray,
-        y_train: pd.Series,
-        X_test: np.ndarray,
-        y_test: pd.Series
-) -> Sequential:
+def define_and_train_model(X_train: np.ndarray, y_train: pd.Series, X_test: np.ndarray, y_test: pd.Series) \
+        -> Sequential:
     """
     Define and train LSTM model
 

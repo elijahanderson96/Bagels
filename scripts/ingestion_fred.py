@@ -47,7 +47,7 @@ def fetch_data(fred: Fred, endpoint: str) -> pd.DataFrame:
     """
     # Sleep so we don't exceed API Usage calls.
     time.sleep(.5)
-    series = pd.DataFrame(fred.get_series(endpoint, observation_start='2000-01-01'))
+    series = pd.DataFrame(fred.get_series(endpoint))
     series = series.resample('D').asfreq()
     series = series.interpolate(method='linear')
 
@@ -97,7 +97,7 @@ def data_refresh(api_key: str) -> None:
         for etf in etfs:
             logger.info(f'Grabbing {etf}.')
             time.sleep(1)
-            df = yfinance.download(etf, start='2020-01-01', end=datetime.datetime.now().date())
+            df = yfinance.download(etf, end=datetime.datetime.now().date())
             df['symbol'] = etf
             df.reset_index(inplace=True)
             [df.rename(columns={col: col.replace(' ', '_').lower()}, inplace=True) for col in df.columns.to_list()]
