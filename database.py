@@ -263,9 +263,9 @@ class PostgreSQLConnector:
         try:
             engine = self.create_engine()
             dataframe.to_sql(**kwargs, con=engine, method=self.psql_insert_copy)
-            print(f"Dataframe inserted into db successfully.")
+            self.logger.info(f"Dataframe inserted into db successfully.")
         except Exception as e:
-            print("Error inserting dataframe: ", e)
+            self.logger.info("Error inserting dataframe: ", e)
 
     @staticmethod
     def psql_insert_copy(table, conn, keys, data_iter):
@@ -313,8 +313,6 @@ class PostgreSQLConnector:
             sql.SQL(', ').join(sql.Placeholder() * len(columns))
         )
         params = tuple(columns.values())
-        print(query)
-        print(params)
         return self.run_query(query, params=params, return_df=False, fetch_one=True)
 
 
