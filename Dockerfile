@@ -1,15 +1,16 @@
-# Use official base image of Python
-FROM python:3.11
+FROM apache/airflow:latest-python3.11
 
-# Set the working directory
-WORKDIR /app
+USER root
+RUN apt-get update
+RUN chown -R airflow: /opt/airflow
 
-# Install the cronjob and Airflow
-RUN apt-get update && apt-get install -y cron && pip install apache-airflow
+WORKDIR /opt/airflow
 
-# Copy the current directory contents into the container at /app
-ADD . /app
+USER airflow
+COPY . /opt/airflow/
+ENV PYTHONPATH "${PYTHONPATH}:/opt/airflow/"
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" -r /opt/airflow/requirements.txt
+
+
 

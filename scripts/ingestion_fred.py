@@ -20,14 +20,14 @@ def load_config(filename: str) -> dict:
     Returns:
         dict: A dictionary containing the configuration data.
     """
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         config = yaml.safe_load(f)
     return config
 
 
-config = load_config('pipeline_metadata.yml')
-endpoints = config['endpoints']
-etfs = config['etfs']
+config = load_config("pipeline_metadata.yml")
+endpoints = config["endpoints"]
+etfs = config["etfs"]
 
 
 def fetch_data(fred: Fred, endpoint: str) -> pd.DataFrame:
@@ -46,13 +46,13 @@ def fetch_data(fred: Fred, endpoint: str) -> pd.DataFrame:
         >>> fetch_data(fred, endpoint)
     """
     # Sleep so we don't exceed API Usage calls.
-    time.sleep(.5)
+    time.sleep(0.5)
     series = pd.DataFrame(fred.get_series(endpoint))
-    series = series.resample('D').asfreq()
-    series = series.interpolate(method='linear')
+    series = series.resample("D").asfreq()
+    series = series.interpolate(method="linear")
 
     series = series.reset_index()
-    series.rename(columns={0: 'value', 'index': 'date'}, inplace=True)
+    series.rename(columns={0: "value", "index": "date"}, inplace=True)
 
     return series
 
@@ -80,39 +80,54 @@ def data_refresh(api_key: str) -> None:
         fred = Fred(api_key=api_key)
         metadata = pd.DataFrame(
             data={
-                'id': range(0, len(endpoints)), 'endpoint': endpoints.keys(),
-                'value': endpoints.values()
+                "id": range(0, len(endpoints)),
+                "endpoint": endpoints.keys(),
+                "value": endpoints.values(),
             }
         )
-        db_kwargs = {'schema': 'fred_raw', 'name': 'endpoints', 'if_exists': 'replace', 'index': False}
+        db_kwargs = {
+            "schema": "fred_raw",
+            "name": "endpoints",
+            "if_exists": "replace",
+            "index": False,
+        }
         db_connector.insert_dataframe(metadata, **db_kwargs)
 
         for endpoint in endpoints.keys():
-            logger.info(f'Grabbing {endpoint}.')
+            logger.info(f"Grabbing {endpoint}.")
             series = fetch_data(fred, endpoint)
-            db_kwargs['name'] = endpoint.lower()
+            db_kwargs["name"] = endpoint.lower()
             db_connector.insert_dataframe(series, **db_kwargs)
 
         dfs = []
 
         for etf in etfs:
-            logger.info(f'Grabbing {etf}.')
+            logger.info(f"Grabbing {etf}.")
             time.sleep(1)
             df = yfinance.download(etf, end=datetime.datetime.now().date())
-            df['symbol'] = etf
+            df["symbol"] = etf
             df.reset_index(inplace=True)
-            [df.rename(columns={col: col.replace(' ', '_').lower()}, inplace=True) for col in df.columns.to_list()]
+            [
+                df.rename(columns={col: col.replace(" ", "_").lower()}, inplace=True)
+                for col in df.columns.to_list()
+            ]
             dfs.append(df)
 
         df = pd.concat(dfs)
-        db_connector.insert_dataframe(df, schema='fred_raw', name='historical_prices', if_exists='replace', index=False)
+        db_connector.insert_dataframe(
+            df,
+            schema="fred_raw",
+            name="historical_prices",
+            if_exists="replace",
+            index=False,
+        )
 
     except Exception as e:
         logger.error(f"Data refresh failed with error {e}")
         raise e
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Your FRED API Key
-    api_key = '7f54d62f0a53c2b106b903fc80ecace1'
+    api_key = "7f54d62f0a53c2b106b903fc80ecace1"
     data_refresh(api_key)

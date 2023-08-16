@@ -81,7 +81,7 @@ class PostgreSQLConnector:
                 port=self.port,
                 user=self.user,
                 password=self.password,
-                dbname=self.dbname
+                dbname=self.dbname,
             )
             self.logger.info("Connection successful")
         except Exception as e:
@@ -94,8 +94,11 @@ class PostgreSQLConnector:
             self.logger.info("Connection closed")
 
     def run_query(
-            self, query: Union[str, Composed], params: Optional[Tuple] = None, return_df: bool = True,
-            fetch_one: bool = False
+        self,
+        query: Union[str, Composed],
+        params: Optional[Tuple] = None,
+        return_df: bool = True,
+        fetch_one: bool = False,
     ) -> Optional[Union[pd.DataFrame, Any]]:
         """
         Execute a query on the database.
@@ -131,10 +134,12 @@ class PostgreSQLConnector:
                     self.conn.commit()
                     return None
         except Exception as e:
-            self.logger.error(f'Error occurred while executing query: {e}')
+            self.logger.error(f"Error occurred while executing query: {e}")
             raise e
 
-    def create_table(self, table_name: str, columns: Dict[str, str], schema: str = 'public') -> None:
+    def create_table(
+        self, table_name: str, columns: Dict[str, str], schema: str = "public"
+    ) -> None:
         """
         Create a table in a specified schema.
 
@@ -148,22 +153,23 @@ class PostgreSQLConnector:
             'myschema')
         """
         try:
-            query = sql.SQL('CREATE TABLE IF NOT EXISTS {}.{} ({})').format(
+            query = sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} ({})").format(
                 sql.Identifier(schema),
                 sql.Identifier(table_name),
-                sql.SQL(', ').join(
-                    sql.SQL('{} {}').format(
-                        sql.Identifier(column), sql.SQL(data_type)
-                    ) for column, data_type in columns.items()
-                )
+                sql.SQL(", ").join(
+                    sql.SQL("{} {}").format(sql.Identifier(column), sql.SQL(data_type))
+                    for column, data_type in columns.items()
+                ),
             )
             self.run_query(query, return_df=False)
-            self.logger.info(f'Table {table_name} created successfully in schema {schema}.')
+            self.logger.info(
+                f"Table {table_name} created successfully in schema {schema}."
+            )
         except Exception as e:
-            self.logger.error(f'Error occurred while creating table: {e}')
+            self.logger.error(f"Error occurred while creating table: {e}")
             raise e
 
-    def table_exists(self, table_name: str, schema: str = 'public') -> bool:
+    def table_exists(self, table_name: str, schema: str = "public") -> bool:
         """
         Checks if a table exists in a specified schema.
 
@@ -178,7 +184,9 @@ class PostgreSQLConnector:
         inspector = inspect(engine)
         return table_name in inspector.get_table_names(schema=schema)
 
-    def add_primary_key(self, table_name: str, column_name: str, schema: str = 'public') -> None:
+    def add_primary_key(
+        self, table_name: str, column_name: str, schema: str = "public"
+    ) -> None:
         """
         Add a primary key to a table.
 
@@ -190,15 +198,23 @@ class PostgreSQLConnector:
         Examples:
             >> connector.add_primary_key('users', 'id', 'myschema')
         """
-        query = sql.SQL('ALTER TABLE {schema}.{table} ADD PRIMARY KEY ({column})').format(
+        query = sql.SQL(
+            "ALTER TABLE {schema}.{table} ADD PRIMARY KEY ({column})"
+        ).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table_name),
-            column=sql.Identifier(column_name)
+            column=sql.Identifier(column_name),
         )
         self.run_query(query, return_df=False)
 
-    def add_foreign_key(self, table_name: str, column_name: str, ref_table: str, ref_column: str,
-                        schema: str = 'public') -> None:
+    def add_foreign_key(
+        self,
+        table_name: str,
+        column_name: str,
+        ref_table: str,
+        ref_column: str,
+        schema: str = "public",
+    ) -> None:
         """
         Add a foreign key to a table.
 
@@ -213,16 +229,23 @@ class PostgreSQLConnector:
             >> connector.add_foreign_key('orders', 'user_id', 'users', 'id', 'myschema')
         """
         query = sql.SQL(
-            'ALTER TABLE {schema}.{table} ADD FOREIGN KEY ({column}) REFERENCES {schema}.{ref_table} ({ref_column})').format(
+            "ALTER TABLE {schema}.{table} ADD FOREIGN KEY ({column}) REFERENCES {schema}.{ref_table} ({ref_column})"
+        ).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table_name),
             column=sql.Identifier(column_name),
             ref_table=sql.Identifier(ref_table),
-            ref_column=sql.Identifier(ref_column)
+            ref_column=sql.Identifier(ref_column),
         )
         self.run_query(query, return_df=False)
 
-    def add_unique_key(self, table_name: str, columns: List[str], constraint_name: str, schema: str = 'public') -> None:
+    def add_unique_key(
+        self,
+        table_name: str,
+        columns: List[str],
+        constraint_name: str,
+        schema: str = "public",
+    ) -> None:
         """
         Add a unique constraint to a table.
 
@@ -240,24 +263,24 @@ class PostgreSQLConnector:
             Exception: If an error occurs while adding the unique key.
         """
         try:
-            query = sql.SQL(
-                'ALTER TABLE {}.{} ADD CONSTRAINT {} UNIQUE ({})'
-            ).format(
+            query = sql.SQL("ALTER TABLE {}.{} ADD CONSTRAINT {} UNIQUE ({})").format(
                 sql.Identifier(schema),
                 sql.Identifier(table_name),
                 sql.Identifier(constraint_name),
-                sql.SQL(', ').join(map(sql.Identifier, columns))
+                sql.SQL(", ").join(map(sql.Identifier, columns)),
             )
             self.run_query(query, return_df=False)
             self.logger.info(
-                f'Unique key {constraint_name} added successfully to table {table_name} in schema {schema}.'
+                f"Unique key {constraint_name} added successfully to table {table_name} in schema {schema}."
             )
         except Exception as e:
-            self.logger.error(f'Error occurred while adding unique key: {e}')
+            self.logger.error(f"Error occurred while adding unique key: {e}")
             raise e
 
     def create_engine(self):
-        return create_engine(f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}")
+        return create_engine(
+            f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
+        )
 
     def insert_dataframe(self, dataframe, **kwargs):
         try:
@@ -277,18 +300,17 @@ class PostgreSQLConnector:
             writer.writerows(data_iter)
             s_buf.seek(0)
 
-            columns = ', '.join('"{}"'.format(k) for k in keys)
+            columns = ", ".join('"{}"'.format(k) for k in keys)
             if table.schema:
-                table_name = '{}.{}'.format(table.schema, table.name)
+                table_name = "{}.{}".format(table.schema, table.name)
             else:
                 table_name = table.name
 
-            sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
-                table_name, columns)
+            sql = "COPY {} ({}) FROM STDIN WITH CSV".format(table_name, columns)
             cur.copy_expert(sql=sql, file=s_buf)
 
     def insert_and_return_id(
-            self, table_name: str, columns: Dict[str, Any], schema: str = 'public'
+        self, table_name: str, columns: Dict[str, Any], schema: str = "public"
     ) -> int:
         """
         Insert a row into a specified table and return the generated id.
@@ -304,24 +326,20 @@ class PostgreSQLConnector:
         Examples:
             >> connector.insert_and_return_id('users', {'name': 'John', 'email': 'john@example.com'}, 'myschema')
         """
-        query = sql.SQL(
-            'INSERT INTO {}.{} ({}) VALUES ({}) RETURNING id'
-        ).format(
+        query = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) RETURNING id").format(
             sql.Identifier(schema),
             sql.Identifier(table_name),
-            sql.SQL(', ').join(map(sql.Identifier, columns.keys())),
-            sql.SQL(', ').join(sql.Placeholder() * len(columns))
+            sql.SQL(", ").join(map(sql.Identifier, columns.keys())),
+            sql.SQL(", ").join(sql.Placeholder() * len(columns)),
         )
         params = tuple(columns.values())
         return self.run_query(query, params=params, return_df=False, fetch_one=True)
 
 
 db_connector = PostgreSQLConnector(
-    host='172.18.240.1',
-    user='elijah',
-    dbname='market_data',
-    port='5432',
-    password='Poodle!3'
+    host="172.30.16.1",
+    user="elijah",
+    dbname="market_data",
+    port="5432",
+    password="Poodle!3",
 )
-
-

@@ -2,10 +2,14 @@ from datetime import datetime
 from typing import Union
 
 from database import PostgreSQLConnector
+from database import db_connector
+
+db_connector.connect()
 
 
-def fetch_actual_value(connector: PostgreSQLConnector, symbol: str, date: Union[str, datetime.date]) -> Union[
-    float, None]:
+def fetch_actual_value(
+    connector: PostgreSQLConnector, symbol: str, date: Union[str, datetime.date]
+) -> Union[float, None]:
     """
     Fetch the closing price from the 'historical_prices' table for a given symbol and date.
 
@@ -52,7 +56,7 @@ def update_actual_values(connector: PostgreSQLConnector) -> None:
 
     for _, row in update_rows.iterrows():
         try:
-            actual_value = fetch_actual_value(connector, row['symbol'], row['date'])
+            actual_value = fetch_actual_value(connector, row["symbol"], row["date"])
 
             if actual_value is not None:
                 # Update the 'actual' field in the 'model_predictions' table
@@ -62,17 +66,20 @@ def update_actual_values(connector: PostgreSQLConnector) -> None:
                 WHERE id = %s AND model_id = %s AND date = %s
                 """
                 connector.run_query(
-                    query, params=(actual_value, row['id'], row['model_id'], row['date']), return_df=False
-                    )
+                    query,
+                    params=(actual_value, row["id"], row["model_id"], row["date"]),
+                    return_df=False,
+                )
 
-                print(f"Updated {row['symbol']} with closing value of {actual_value} on date {row['date']}")
+                print(
+                    f"Updated {row['symbol']} with closing value of {actual_value} on date {row['date']}"
+                )
 
         except Exception as e:
-            print(f"Failed to update actual value for model_id {row['id']} on date {row['date']}: {e}")
+            print(
+                f"Failed to update actual value for model_id {row['id']} on date {row['date']}: {e}"
+            )
 
 
 if __name__ == "__main__":
-    from database import db_connector
-
-    db_connector.connect()
     update_actual_values(db_connector)
