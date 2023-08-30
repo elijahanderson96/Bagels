@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from datetime import timedelta
 from functools import reduce
@@ -15,8 +16,7 @@ from tensorflow.keras.layers import LSTM
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
-from database import db_connector
-from database import PostgreSQLConnector
+from database.database import db_connector
 from scripts.ingestion_fred import data_refresh
 from scripts.ingestion_fred import endpoints
 from scripts.ingestion_fred import etfs
@@ -29,16 +29,17 @@ logging.basicConfig(
 
 class ETFPredictor:
     def __init__(
-        self,
-        table_names: List[str],
-        etf_symbol: str,
-        days_forecast: int,
-        connector: PostgreSQLConnector,
+            self,
+            table_names: List[str],
+            etf_symbol: str,
+            days_forecast: int,
     ):
+        self.n_training_points = None
+        self.trained_to = None
+        self.trained_from = None
         self.table_names = table_names
         self.etf_symbol = etf_symbol
         self.days_forecast = days_forecast
-        self.db_connector = connector
         self.model = None
 
     def _get_data_from_tables(self) -> List[pd.DataFrame]:
@@ -52,11 +53,10 @@ class ETFPredictor:
             List[pd.DataFrame]: List of dataframes
         """
         logging.info("Fetching data from tables...")
-        self.db_connector.connect()
 
         try:
             dfs = [
-                db_connector.run_query(f"SELECT * FROM fred_raw.{table}")
+                db_connector.run_query(f"SELECT * FROM data.{table}")
                 for table in self.table_names
             ]
             for table, df in dict(zip(self.table_names, dfs)).items():
@@ -71,7 +71,7 @@ class ETFPredictor:
             return dfs
 
     def _align_dates(
-        self, df_list: List[pd.DataFrame], date_column: str
+            self, df_list: List[pd.DataFrame], date_column: str
     ) -> pd.DataFrame:
         """
         Align dates across different dataframes in the list
@@ -84,23 +84,21 @@ class ETFPredictor:
             pd.DataFrame: Merged DataFrame with aligned dates
         """
         logging.info("Aligning dates across dataframes...")
-        target_max_date = datetime.now()
         try:
+            # Convert date columns to datetime and set as index
             for i, df in enumerate(df_list):
                 df[date_column] = df[date_column].astype("datetime64[ns]")
-                date_diff = target_max_date - df[date_column].max()
-                df[date_column] = df[date_column] + date_diff
                 df.set_index(date_column, inplace=True)
                 df_list[i] = df
 
+            # Merge all dataframes in the list based on the date index
             df_final = reduce(
                 lambda left, right: pd.merge(
-                    left, right, left_index=True, right_index=True
+                    left, right, left_index=True, right_index=True, how='outer'
                 ),
                 df_list,
             )
             df_final.reset_index(inplace=True)
-            df_final["date"] = df_final["date"].apply(lambda date: date.date())
 
             drop_columns = (
                 ["date", "symbol"] if "symbol" in df_final.columns else ["date"]
@@ -111,7 +109,7 @@ class ETFPredictor:
             raise
         else:
             logging.info("Date alignment completed.")
-            return df_final
+            return df_final.dropna()
 
     def _get_labels(self) -> Tuple[pd.DataFrame, MinMaxScaler]:
         """
@@ -126,11 +124,10 @@ class ETFPredictor:
             # TODO bring out this query to the separate file.
             labels_df = db_connector.run_query(
                 "SELECT date, close "
-                "FROM fred_raw.historical_prices "
+                "FROM data.historical_prices "
                 f"WHERE symbol='{self.etf_symbol}'"
             )
 
-            labels_df["date"] = labels_df["date"].apply(lambda date: date.date())
             labels_df.sort_values("date", inplace=True)
 
             # Scale the labels
@@ -147,7 +144,7 @@ class ETFPredictor:
             return labels_df, scaler
 
     def _split_data(
-        self, features_df: pd.DataFrame, labels_df: pd.DataFrame
+            self, features_df: pd.DataFrame, labels_df: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Split data into training and prediction sets
@@ -163,7 +160,6 @@ class ETFPredictor:
         logging.info("Splitting data into training and prediction sets...")
 
         try:
-            # features need to be set forward 28 days to create prediction data
             features_df["date"] = features_df["date"] + timedelta(
                 days=self.days_forecast
             )
@@ -171,7 +167,7 @@ class ETFPredictor:
             data_df = features_df.merge(labels_df, how="left", on="date")
             data_df.dropna(subset=["close"], inplace=True)
 
-            today = datetime.now().date()
+            today = datetime.now()
 
             train_df = data_df[data_df["date"] <= today]
             predict_df = features_df[features_df["date"] > today]
@@ -187,7 +183,7 @@ class ETFPredictor:
             return train_df, predict_df
 
     def _preprocess_data(
-        self, df: pd.DataFrame
+            self, df: pd.DataFrame
     ) -> Tuple[np.ndarray, pd.Series, MinMaxScaler]:
         """
         Preprocesses the data for LSTM
@@ -221,12 +217,12 @@ class ETFPredictor:
             return data, labels, scaler
 
     def _define_and_train_model(
-        self,
-        X_train: np.ndarray,
-        y_train: pd.Series,
-        X_test: np.ndarray,
-        y_test: pd.Series,
-        validate=False,
+            self,
+            X_train: np.ndarray,
+            y_train: pd.Series,
+            X_test: np.ndarray,
+            y_test: pd.Series,
+            validate=False,
     ) -> Sequential:
         """
         Define and train LSTM model
@@ -269,7 +265,7 @@ class ETFPredictor:
         # Define early stopping
         early_stopping = EarlyStopping(
             monitor="val_loss" if validate else "loss",
-            patience=25,
+            patience=10,
             mode="min",
             restore_best_weights=True,
         )
@@ -280,9 +276,9 @@ class ETFPredictor:
             history = self.model.fit(
                 X_train,
                 y_train,
-                epochs=2500,
+                epochs=500,
                 validation_data=(X_test, y_test) if validate else None,
-                verbose=0,
+                verbose=1,
                 callbacks=[early_stopping],
             )
 
@@ -294,10 +290,10 @@ class ETFPredictor:
             return history
 
     def _predict(
-        self,
-        predict_data: pd.DataFrame,
-        scaler: MinMaxScaler,
-        label_scaler: MinMaxScaler,
+            self,
+            predict_data: pd.DataFrame,
+            scaler: MinMaxScaler,
+            label_scaler: MinMaxScaler,
     ) -> np.ndarray:
         """
         Generate predictions with the trained model
@@ -316,7 +312,9 @@ class ETFPredictor:
             predict_data.sort_index()
             predict_data.dropna(inplace=True)
 
-            predict_data = np.expand_dims(scaler.transform(predict_data), axis=1)
+            predict_data = np.expand_dims(
+                scaler.transform(predict_data), axis=1
+            )
             y_pred = self.model.predict(predict_data)
 
             # Inverse transformation
@@ -328,62 +326,6 @@ class ETFPredictor:
         else:
             logging.info("Predictions made successfully.")
             return y_pred
-
-    def create_model_and_prediction_tables(self):
-        """DDL like function that creates the model metadata tables if they do not exist already
-        within the fred_raw' schema. This is how we track our inferences, and deployed models.
-        """
-
-        if self.db_connector.table_exists("models", schema="forecasts"):
-            logging.info("Table already exists, skipping creation.")
-            return
-
-        # Define the "models" table
-        models_columns = {
-            "id": "SERIAL PRIMARY KEY",
-            "symbol": "TEXT",
-            "date_trained": "DATE",
-            "features": "TEXT",
-            "loss": "REAL",
-            "days_forecast": "INTEGER",
-        }
-
-        # Create the "models" table
-        self.db_connector.create_table("models", models_columns, schema="forecasts")
-
-        # Add unique key to "models"
-        self.db_connector.add_unique_key(
-            "models",
-            ["date_trained", "features", "symbol", "days_forecast"],
-            "models_unique_key",
-            schema="forecasts",
-        )
-
-        # Define the "model_predictions" table
-        model_predictions_columns = {
-            "id": "SERIAL PRIMARY KEY",
-            "model_id": "INTEGER",
-            "date": "DATE",
-            "prediction": "REAL",
-            "actual": "REAL",
-        }
-
-        # Create the "model_predictions" table
-        self.db_connector.create_table(
-            "model_predictions", model_predictions_columns, schema="forecasts"
-        )
-
-        # Add unique key to "model_predictions"
-        self.db_connector.add_unique_key(
-            "model_predictions",
-            ["model_id", "date"],
-            "model_predictions_unique_key",
-            schema="forecasts",
-        )
-        # Add foreign key to "model_predictions"
-        self.db_connector.add_foreign_key(
-            "model_predictions", "model_id", "models", "id", schema="forecasts"
-        )
 
     def _store_predictions(self, predictions_df: pd.DataFrame, model_id: int) -> None:
         """
@@ -400,10 +342,10 @@ class ETFPredictor:
             kwargs = {
                 "name": "model_predictions",
                 "if_exists": "append",
-                "schema": "forecasts",
+                "schema": "models",
                 "index": False,
             }
-            self.db_connector.insert_dataframe(predictions_df, **kwargs)
+            db_connector.insert_dataframe(predictions_df, **kwargs)
         except Exception as e:
             logging.error(f"Failed to store model predictions due to {e}.")
             raise
@@ -416,9 +358,11 @@ class ETFPredictor:
         """
         logging.info("Storing model metadata...")
         try:
-            self.create_model_and_prediction_tables()
             model = pd.DataFrame(
                 {
+                    "trained_from": [self.trained_from],
+                    "trained_to": [self.trained_to],
+                    "n_training_points": [self.n_training_points],
                     "date_trained": [datetime.now().date()],
                     "symbol": [self.etf_symbol],
                     # early stopping should return the lowest loss value since we're keeping best weights.
@@ -427,10 +371,10 @@ class ETFPredictor:
                     "days_forecast": [self.days_forecast],
                 }
             )
-            model_id = self.db_connector.insert_and_return_id(
+            model_id = db_connector.insert_and_return_id(
                 table_name="models",
                 columns=model.to_dict("records")[0],
-                schema="forecasts",
+                schema="models",
             )
         except Exception as e:
             logging.error(f"Failed to store model metrics due to {e}.")
@@ -444,8 +388,14 @@ class ETFPredictor:
         features_df = self._align_dates(dfs, "date")
         labels_df, labels_scaler = self._get_labels()
         train_df, predict_df = self._split_data(features_df, labels_df)
+        
+        self.trained_from = min(train_df['date'])
+        self.trained_to = max(train_df['date'])
+        self.n_training_points = len(train_df)
 
-        train_data, train_labels, feature_scaler = self._preprocess_data(train_df)
+        train_data, train_labels, feature_scaler = self._preprocess_data(
+            train_df
+        )
 
         if validate:
             X_train, X_val, y_train, y_val = train_test_split(
@@ -460,7 +410,10 @@ class ETFPredictor:
         predictions = self._predict(predict_df, feature_scaler, labels_scaler)
 
         result_df = pd.DataFrame(
-            {"date": predict_df["date"].to_list(), "prediction": predictions.flatten()}
+            {
+                "date": predict_df["date"].to_list(
+                ), "prediction": predictions.flatten()
+            }
         )
 
         result_df.drop_duplicates(subset=["date"], inplace=True)
@@ -470,11 +423,10 @@ class ETFPredictor:
 
 
 if __name__ == "__main__":
-    api_key = "7f54d62f0a53c2b106b903fc80ecace1"
     tables = [endpoint.lower() for endpoint in endpoints.keys()]
-    data_refresh(api_key)
+    data_refresh(os.getenv("FRED_API_KEY"))
     for etf in etfs:
         predictor = ETFPredictor(
-            table_names=tables, etf_symbol=etf, days_forecast=28, connector=db_connector
+            table_names=tables, etf_symbol=etf, days_forecast=7 * 52
         )
         predictor.predict()

@@ -2,18 +2,17 @@ import os
 
 from dotenv import load_dotenv
 
-from config.filepaths import *
-
-load_dotenv(PATH_TO_DOTENV, verbose=True, override=True)
+load_dotenv(os.path.join(os.getcwd(), 'config', '.env'), verbose=False, override=True)
 print("Loading environment variables")
 
 ENV = os.getenv("ENV")
 
-if ENV == "production":
-    POSTGRES_URL = os.getenv("POSTGRES_PROD_URL")
-    TOKEN = os.getenv("PRODUCTION_TOKEN")
-    BASE_URL = os.getenv("PRODUCTION_IEX_URL")
-else:
-    POSTGRES_URL = os.getenv("POSTGRES_DEV_URL")
-    TOKEN = os.getenv("SANDBOX_TOKEN")
-    BASE_URL = os.getenv("SANDBOX_IEX_URL")
+print(f"We are in a {ENV} environment.")
+
+db_config = {
+    'host': os.getenv('POSTGRES_HOST_ADDRESS'),
+    'port': os.getenv('POSTGRES_PORT'),
+    'user': os.getenv('POSTGRES_USERNAME'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'dbname': os.getenv('POSTGRES_NAME')
+}

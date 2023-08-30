@@ -7,3 +7,9 @@ scipy
 SQLAlchemy
 tensorflow
 yfinance
+black
+flake8
+autopep8
+isort
+python-dotenv
+PyYAML

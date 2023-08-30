@@ -4,12 +4,10 @@ from airflow import DAG
 from airflow.operators.email_operator import EmailOperator
 from airflow.operators.python_operator import PythonOperator
 
-from database import db_connector
+from database.database import db_connector
 from scripts import update_actual_values
 from scripts.etf_predictor import ETFPredictor
-from scripts.ingestion_fred import data_refresh
-from scripts.ingestion_fred import endpoints
-from scripts.ingestion_fred import etfs
+from scripts.ingestion_fred import data_refresh, endpoints, etfs
 from scripts.update_actual_values import update_actual_values
 
 default_args = {

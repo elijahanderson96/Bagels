@@ -7,7 +7,7 @@ import yaml
 import yfinance
 from fredapi import Fred
 
-from database import db_connector
+from database.database import db_connector
 
 
 def load_config(filename: str) -> dict:
@@ -86,7 +86,7 @@ def data_refresh(api_key: str) -> None:
             }
         )
         db_kwargs = {
-            "schema": "fred_raw",
+            "schema": "data",
             "name": "endpoints",
             "if_exists": "replace",
             "index": False,
@@ -108,7 +108,8 @@ def data_refresh(api_key: str) -> None:
             df["symbol"] = etf
             df.reset_index(inplace=True)
             [
-                df.rename(columns={col: col.replace(" ", "_").lower()}, inplace=True)
+                df.rename(columns={col: col.replace(
+                    " ", "_").lower()}, inplace=True)
                 for col in df.columns.to_list()
             ]
             dfs.append(df)
@@ -116,7 +117,7 @@ def data_refresh(api_key: str) -> None:
         df = pd.concat(dfs)
         db_connector.insert_dataframe(
             df,
-            schema="fred_raw",
+            schema="data",
             name="historical_prices",
             if_exists="replace",
             index=False,
