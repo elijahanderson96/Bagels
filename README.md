@@ -1,2 +1,1 @@
-# iex_api
-Package to easily get endpoints from IEX_Cloud
+Bagels is an ETF Forecasting Project which uses data from the Federal Reserve of St. Louis. The current features and ETFs can be seen in the pipeline_metadata.yml file. The scripts/etf_predictor.py class contains the code for building the models in tensorflow. The scripts/ingestion_fred.py contains the code responsible for sourcing the input data. 
