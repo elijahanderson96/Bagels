@@ -1,17 +1,18 @@
 # set up the database from scratch.
 from database import PostgreSQLConnector
 
-connector = PostgreSQLConnector(host='localhost',
-                                port='5432',
-                                user='postgres',
-                                password='password',
-                                )
+connector = PostgreSQLConnector(
+    host="localhost",
+    port="5432",
+    user="postgres",
+    password="password",
+)
 
-connector.create_database('bagels')
+connector.create_database("bagels")
 
-connector.dbname = 'bagels'
+connector.dbname = "bagels"
 
-schemas = ('models', 'data', 'users')
+schemas = ("models", "data", "users")
 
 [connector.create_schema(schema) for schema in schemas]
 
@@ -44,9 +45,7 @@ model_predictions_columns = {
     "actual": "REAL",
 }
 
-connector.create_table(
-    "model_predictions", model_predictions_columns, schema="models"
-)
+connector.create_table("model_predictions", model_predictions_columns, schema="models")
 
 connector.add_unique_key(
     "model_predictions",

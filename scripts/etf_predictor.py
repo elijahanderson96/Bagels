@@ -29,10 +29,10 @@ logging.basicConfig(
 
 class ETFPredictor:
     def __init__(
-            self,
-            table_names: List[str],
-            etf_symbol: str,
-            days_forecast: int,
+        self,
+        table_names: List[str],
+        etf_symbol: str,
+        days_forecast: int,
     ):
         self.n_training_points = None
         self.trained_to = None
@@ -71,7 +71,7 @@ class ETFPredictor:
             return dfs
 
     def _align_dates(
-            self, df_list: List[pd.DataFrame], date_column: str
+        self, df_list: List[pd.DataFrame], date_column: str
     ) -> pd.DataFrame:
         """
         Align dates across different dataframes in the list
@@ -94,7 +94,7 @@ class ETFPredictor:
             # Merge all dataframes in the list based on the date index
             df_final = reduce(
                 lambda left, right: pd.merge(
-                    left, right, left_index=True, right_index=True, how='outer'
+                    left, right, left_index=True, right_index=True, how="outer"
                 ),
                 df_list,
             )
@@ -144,7 +144,7 @@ class ETFPredictor:
             return labels_df, scaler
 
     def _split_data(
-            self, features_df: pd.DataFrame, labels_df: pd.DataFrame
+        self, features_df: pd.DataFrame, labels_df: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Split data into training and prediction sets
@@ -183,7 +183,7 @@ class ETFPredictor:
             return train_df, predict_df
 
     def _preprocess_data(
-            self, df: pd.DataFrame
+        self, df: pd.DataFrame
     ) -> Tuple[np.ndarray, pd.Series, MinMaxScaler]:
         """
         Preprocesses the data for LSTM
@@ -217,12 +217,12 @@ class ETFPredictor:
             return data, labels, scaler
 
     def _define_and_train_model(
-            self,
-            X_train: np.ndarray,
-            y_train: pd.Series,
-            X_test: np.ndarray,
-            y_test: pd.Series,
-            validate=False,
+        self,
+        X_train: np.ndarray,
+        y_train: pd.Series,
+        X_test: np.ndarray,
+        y_test: pd.Series,
+        validate=False,
     ) -> Sequential:
         """
         Define and train LSTM model
@@ -290,10 +290,10 @@ class ETFPredictor:
             return history
 
     def _predict(
-            self,
-            predict_data: pd.DataFrame,
-            scaler: MinMaxScaler,
-            label_scaler: MinMaxScaler,
+        self,
+        predict_data: pd.DataFrame,
+        scaler: MinMaxScaler,
+        label_scaler: MinMaxScaler,
     ) -> np.ndarray:
         """
         Generate predictions with the trained model
@@ -312,9 +312,7 @@ class ETFPredictor:
             predict_data.sort_index()
             predict_data.dropna(inplace=True)
 
-            predict_data = np.expand_dims(
-                scaler.transform(predict_data), axis=1
-            )
+            predict_data = np.expand_dims(scaler.transform(predict_data), axis=1)
             y_pred = self.model.predict(predict_data)
 
             # Inverse transformation
@@ -388,14 +386,12 @@ class ETFPredictor:
         features_df = self._align_dates(dfs, "date")
         labels_df, labels_scaler = self._get_labels()
         train_df, predict_df = self._split_data(features_df, labels_df)
-        
-        self.trained_from = min(train_df['date'])
-        self.trained_to = max(train_df['date'])
+
+        self.trained_from = min(train_df["date"])
+        self.trained_to = max(train_df["date"])
         self.n_training_points = len(train_df)
 
-        train_data, train_labels, feature_scaler = self._preprocess_data(
-            train_df
-        )
+        train_data, train_labels, feature_scaler = self._preprocess_data(train_df)
 
         if validate:
             X_train, X_val, y_train, y_val = train_test_split(
@@ -410,10 +406,7 @@ class ETFPredictor:
         predictions = self._predict(predict_df, feature_scaler, labels_scaler)
 
         result_df = pd.DataFrame(
-            {
-                "date": predict_df["date"].to_list(
-                ), "prediction": predictions.flatten()
-            }
+            {"date": predict_df["date"].to_list(), "prediction": predictions.flatten()}
         )
 
         result_df.drop_duplicates(subset=["date"], inplace=True)

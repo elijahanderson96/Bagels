@@ -60,7 +60,9 @@ class PostgreSQLConnector:
         Helper function to use PostgreSQL's COPY command for faster inserts.
     """
 
-    def __init__(self, host: str, port: str, user: str, password: str, dbname: str = None):
+    def __init__(
+        self, host: str, port: str, user: str, password: str, dbname: str = None
+    ):
         self.host = host
         self.port = port
         self.user = user
@@ -136,8 +138,7 @@ class PostgreSQLConnector:
             dbname (str): The name of the database to create.
         """
         # Establish a new connection to the PostgreSQL server
-        conn = psycopg2.connect(
-            user=self.user, host=self.host, password=self.password)
+        conn = psycopg2.connect(user=self.user, host=self.host, password=self.password)
         conn.autocommit = True  # Enable autocommit mode for this transaction
 
         with conn.cursor() as cur:
@@ -148,8 +149,7 @@ class PostgreSQLConnector:
                 if "already exists" in str(e):
                     self.logger.info(f"Database {dbname} already exists.")
                 else:
-                    self.logger.error(
-                        f"Error occurred while creating database: {e}")
+                    self.logger.error(f"Error occurred while creating database: {e}")
                     raise e
         conn.close()  # Close the connection
 
@@ -216,8 +216,7 @@ class PostgreSQLConnector:
                 sql.Identifier(schema),
                 sql.Identifier(table_name),
                 sql.SQL(", ").join(
-                    sql.SQL("{} {}").format(
-                        sql.Identifier(column), sql.SQL(data_type))
+                    sql.SQL("{} {}").format(sql.Identifier(column), sql.SQL(data_type))
                     for column, data_type in columns.items()
                 ),
             )
@@ -391,8 +390,7 @@ class PostgreSQLConnector:
             engine = create_engine(
                 f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
             )
-            dataframe.to_sql(**kwargs, con=engine,
-                             method=self.psql_insert_copy)
+            dataframe.to_sql(**kwargs, con=engine, method=self.psql_insert_copy)
             engine.dispose()  # close the engine
             self.logger.info(f"Dataframe inserted into db successfully.")
         except Exception as e:
@@ -415,8 +413,7 @@ class PostgreSQLConnector:
             else:
                 table_name = table.name
 
-            sql = "COPY {} ({}) FROM STDIN WITH CSV".format(
-                table_name, columns)
+            sql = "COPY {} ({}) FROM STDIN WITH CSV".format(table_name, columns)
             cur.copy_expert(sql=sql, file=s_buf)
 
     def insert_and_return_id(
@@ -500,8 +497,7 @@ class PostgreSQLConnector:
                 sql.Identifier(table_name),
             )
 
-            self.run_query(update_query, params=(
-                sequence_name,), return_df=False)
+            self.run_query(update_query, params=(sequence_name,), return_df=False)
 
             self.logger.info(
                 f"Sequence {sequence_name} updated successfully for table {table_name}."
@@ -543,8 +539,7 @@ class PostgreSQLConnector:
             sql.Identifier(schema),
             sql.Identifier(table_name),
             sql.SQL(" AND ").join(
-                sql.SQL("{} = {}").format(
-                    sql.Identifier(key), sql.Placeholder())
+                sql.SQL("{} = {}").format(sql.Identifier(key), sql.Placeholder())
                 for key in columns
             ),
         )

@@ -55,8 +55,7 @@ def update_actual_values(connector: PostgreSQLConnector) -> None:
 
     for _, row in update_rows.iterrows():
         try:
-            actual_value = fetch_actual_value(
-                connector, row["symbol"], row["date"])
+            actual_value = fetch_actual_value(connector, row["symbol"], row["date"])
 
             if actual_value is not None:
                 # Update the 'actual' field in the 'model_predictions' table
@@ -67,8 +66,7 @@ def update_actual_values(connector: PostgreSQLConnector) -> None:
                 """
                 connector.run_query(
                     query,
-                    params=(actual_value, row["id"],
-                            row["model_id"], row["date"]),
+                    params=(actual_value, row["id"], row["model_id"], row["date"]),
                     return_df=False,
                 )
 

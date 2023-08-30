@@ -108,8 +108,7 @@ def data_refresh(api_key: str) -> None:
             df["symbol"] = etf
             df.reset_index(inplace=True)
             [
-                df.rename(columns={col: col.replace(
-                    " ", "_").lower()}, inplace=True)
+                df.rename(columns={col: col.replace(" ", "_").lower()}, inplace=True)
                 for col in df.columns.to_list()
             ]
             dfs.append(df)

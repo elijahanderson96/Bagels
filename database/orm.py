@@ -5,10 +5,10 @@
 from database.database import PostgreSQLConnector
 from config.configs import db_config
 
+
 class BagelsORM(PostgreSQLConnector):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
 
 
 orm = BagelsORM(**db_config)
