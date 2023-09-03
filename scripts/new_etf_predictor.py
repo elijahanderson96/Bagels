@@ -7,12 +7,12 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
+from keras.callbacks import EarlyStopping
 from keras.layers import Dense
 from keras.layers import Dropout
 from keras.layers import LSTM
 from keras.models import Sequential
-from keras.callbacks import EarlyStopping
-
+from keras.src.optimizers import Adam
 from sklearn.preprocessing import StandardScaler
 
 from database.database import db_connector
@@ -21,11 +21,11 @@ from scripts.ingestion_fred import endpoints
 
 class DatasetBuilder:
     def __init__(
-            self, table_names: List[str], etf_symbol: str, sequence_length: int = 14
+            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
-        self.sequence_length = sequence_length
+        self.forecast_n_days_ahead = forecast_n_days_ahead
 
     def _get_data_from_tables(self) -> List[pd.DataFrame]:
         logging.info("Fetching data from tables...")
@@ -86,7 +86,7 @@ class DatasetBuilder:
             return labels_df
 
     def _split_data(
-            self, features_df: pd.DataFrame, labels_df: pd.DataFrame
+            self, features_df: pd.DataFrame, labels_df: pd.DataFrame, days_ahead: int = 1
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.info("Splitting data into training and prediction sets...")
         try:
@@ -98,7 +98,7 @@ class DatasetBuilder:
 
             # Offset the features by the sequence length for merging with labels
             features_df["offset_date"] = features_df["date"] + timedelta(
-                days=self.sequence_length
+                days=self.forecast_n_days_ahead
             )
 
             # Merge on the offset dates
@@ -112,14 +112,14 @@ class DatasetBuilder:
 
             # Split the data
             last_training_date = features_df["date"].max() - timedelta(
-                days=self.sequence_length
+                days=self.forecast_n_days_ahead
             )
             train_df = data_df[data_df["date"] <= last_training_date]
             predict_df = features_df[
                 (features_df["date"] > last_training_date)
                 & (
                         features_df["date"]
-                        <= last_training_date + timedelta(days=self.sequence_length)
+                        <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
                 )
                 ]
 
@@ -138,103 +138,91 @@ class DatasetBuilder:
         return train, predict
 
 
-tables = [endpoint.lower() for endpoint in endpoints.keys()]
-self = DatasetBuilder(table_names=tables, etf_symbol="SPY", sequence_length=7)
-train_data, predict_data = self.build_datasets()
-train_data.drop(columns="date_label", inplace=True)
-
-
 class ETFPredictor:
     def __init__(
-            self, train_data, predict_data, sequence_length=7, epochs=1000, batch_size=32
+            self, train_data, predict_data, sequence_length=28, epochs=1000, batch_size=32, stride=1
     ):
-        self.train_data = train_data.sort_values(
-            by="date"
-        )  # Ensure data is sorted by date
+        self.train_data = train_data.sort_values(by="date")
         self.predict_data = predict_data.sort_values(by="date")
         self.sequence_length = sequence_length
         self.epochs = epochs
         self.batch_size = batch_size
+        self.stride = stride
+
         self.scaler = StandardScaler()
         self.model = self._build_model()
 
     def _build_model(self):
         model = Sequential()
-        model.add(
-            LSTM(
-                units=50, return_sequences=True, input_shape=(self.sequence_length, 44)
-            )
+        model.add(LSTM(units=25, return_sequences=True, input_shape=(self.sequence_length, 11)))
+        model.add(Dropout(0.2))
+        model.add(LSTM(units=10, return_sequences=True))
+        model.add(LSTM(units=5))
+        model.add(Dense(units=self.sequence_length))
+        model.compile(optimizer=Adam(learning_rate=0.01), loss="mean_absolute_error"
         )
-        model.add(Dropout(0.2))
-        model.add(LSTM(units=50))
-        model.add(Dropout(0.2))
-        model.add(Dense(units=1))
-        model.compile(optimizer="adam", loss="mean_squared_error")
         return model
 
-    def preprocess_data(self):
-        # Scale features
+    def preprocess_data(self, split_ratio=.8, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values
         y = self.train_data["close"].values
-
         X = self.scaler.fit_transform(X)
 
-        # Reshape for LSTM
-        X = np.array(
-            [
-                X[i: i + self.sequence_length]
-                for i in range(len(X) - self.sequence_length)
-            ]
-        )
-        y = y[self.sequence_length:]
+        sequences = [X[i: i + self.sequence_length] for i in range(0, len(X) - self.sequence_length, self.stride)]
+        X = np.array(sequences)
+        y_sequences = [y[i: i + self.sequence_length] for i in range(0, len(y) - self.sequence_length, self.stride)]
+        y = np.array(y_sequences)
 
-        return X, y
-
-    def train(self):
-        X, y = self.preprocess_data()
-        # Define early stopping callback
-        early_stop = EarlyStopping(monitor='loss', patience=10, verbose=1, restore_best_weights=True)
-
-        self.model.fit(X, y, epochs=self.epochs, batch_size=self.batch_size, callbacks=[early_stop])
-
-    def predict(self):
-        # Preprocess prediction data similarly to training data
-        if len(self.predict_data) >= self.sequence_length:
-            X_predict = self.predict_data.drop(columns=["date", "offset_date"]).values
-            dates_predict = self.predict_data["offset_date"].values[
-                            self.sequence_length - 1:
-                            ]  # Extract dates for predictions
-
-            # Ensure the date column is excluded before scaling
-            X_predict = self.scaler.transform(X_predict)
-
-            # Reshape X_predict to have the shape (batch_size, sequence_length, number_of_features)
-            X_predict = np.reshape(
-                X_predict, (1, self.sequence_length, -1)
-            )  # -1 here will automatically use 44 (number of features)
-
-            predictions = self.model.predict(X_predict)
-
-            # Return the predictions alongside their corresponding dates
-            return pd.DataFrame(
-                {"Date": dates_predict, "Predicted_Close": predictions.flatten()}
-            )
+        if validate:
+            split_idx = int(split_ratio * len(X))
+            X_train = X[:split_idx]
+            y_train = y[:split_idx]
+            X_val = X[split_idx:]
+            y_val = y[split_idx:]
+            return X_train, y_train, X_val, y_val
         else:
-            print(
-                "The prediction dataset doesn't have enough rows for the given sequence length."
+            return X, y, None, None
+
+    def train(self, validate=True):
+        X_train, y_train, X_val, y_val = self.preprocess_data(validate=validate)
+        early_stop = EarlyStopping(
+            monitor='val_loss' if validate else 'loss', patience=25, verbose=1, restore_best_weights=True
             )
-            return None
+        if validate:
+            self.model.fit(
+                X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, validation_data=(X_val, y_val),
+                callbacks=[early_stop]
+                )
+        else:
+            self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, callbacks=[early_stop])
+
+    def predict(self, future_days=28):
+        last_sequence = self.scaler.transform(self.predict_data.drop(columns=["date", "offset_date"]).values)[-self.sequence_length:]
+        last_sequence = last_sequence.reshape((1, self.sequence_length, 11))
+        predicted_sequence = self.model.predict(last_sequence)[0]
+        dates_predict = self.predict_data["date"].iloc[-1]
+        future_dates = pd.date_range(start=dates_predict, periods=future_days + 1)[1:]
+        prediction_df = pd.DataFrame({"Date": future_dates, "Predicted_Close": predicted_sequence})
+
+        return prediction_df
+
+
+tables = [endpoint.lower() for endpoint in endpoints.keys()]
+self = DatasetBuilder(table_names=tables, etf_symbol="AGG", forecast_n_days_ahead=28)
+train_data, predict_data = self.build_datasets()
+train_data.drop(columns="date_label", inplace=True)
 
 
 # Usage:
 self = ETFPredictor(
     train_data=train_data,
     predict_data=predict_data,
-    sequence_length=7,
+    sequence_length=28,
     epochs=20000,
-    batch_size=64,
+    batch_size=1,
+    stride=28
 )
-self.train()
-predictions = self.predict()
+self.train(validate=True)
+predictions = self.predict(future_days=28)
 
 print(predictions)

@@ -14,4 +14,4 @@ COPY . .
 
 ENV PYTHONPATH=/app
 # set the default command to execute the Python script
-CMD ["python3", "scripts/etf_predictor.py"]
+CMD ["python3", "scripts/new_etf_predictor.py"]
