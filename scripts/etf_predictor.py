@@ -1,5 +1,4 @@
 import logging
-import os
 from datetime import datetime
 from datetime import timedelta
 from functools import reduce
@@ -17,7 +16,6 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
 from database.database import db_connector
-from scripts.ingestion_fred import data_refresh
 from scripts.ingestion_fred import endpoints
 from scripts.ingestion_fred import etfs
 
@@ -33,6 +31,8 @@ class ETFPredictor:
         table_names: List[str],
         etf_symbol: str,
         days_forecast: int,
+        input_seq_length: int = 14,
+        output_seq_length: int = 14,
     ):
         self.n_training_points = None
         self.trained_to = None
@@ -40,35 +40,26 @@ class ETFPredictor:
         self.table_names = table_names
         self.etf_symbol = etf_symbol
         self.days_forecast = days_forecast
+        self.input_seq_length = input_seq_length
+        self.output_seq_length = output_seq_length
         self.model = None
 
-    def _get_data_from_tables(self) -> List[pd.DataFrame]:
+    def _generate_sequences(self, data, labels):
         """
-        Fetch data from database tables
-
-        Args:
-            table_names (List[str]): List of table names
-
-        Returns:
-            List[pd.DataFrame]: List of dataframes
+        Generate sequences for LSTM input and output
         """
-        logging.info("Fetching data from tables...")
-
-        try:
-            dfs = [
-                db_connector.run_query(f"SELECT * FROM data.{table}")
-                for table in self.table_names
-            ]
-            for table, df in dict(zip(self.table_names, dfs)).items():
-                df.rename(columns={"value": table}, inplace=True)
-
-        except Exception as e:
-            logging.error(f"Failed to fetch data from tables due to {e}.")
-            raise
-
-        else:
-            logging.info("Data fetched successfully.")
-            return dfs
+        X, y = [], []
+        for i in range(len(data) - self.input_seq_length - self.output_seq_length + 1):
+            X.append(data[i : i + self.input_seq_length])
+            y.append(
+                labels[
+                    i
+                    + self.input_seq_length : i
+                    + self.input_seq_length
+                    + self.output_seq_length
+                ]
+            )
+        return np.array(X), np.array(y)
 
     def _align_dates(
         self, df_list: List[pd.DataFrame], date_column: str
@@ -193,7 +184,6 @@ class ETFPredictor:
 
         Returns:
             Tuple[np.ndarray, pd.Series, MinMaxScaler]: Processed data, labels, fitted scaler
-
         """
         logging.info("Preprocessing data...")
         try:
@@ -207,11 +197,13 @@ class ETFPredictor:
             scaler = MinMaxScaler()
             df = pd.DataFrame(scaler.fit_transform(df), columns=df.columns)
 
-            # Convert the dataframe into a 3D array (samples, timesteps, features) for LSTM
-            data = np.expand_dims(df.values, axis=1)
+            # Convert the dataframe into sequences for LSTM
+            data, labels = self._generate_sequences(df.values, labels.values)
+
         except Exception as e:
             logging.error(f"Failed to preprocess data due to {e}.")
             raise
+
         else:
             logging.info("Data preprocessing completed.")
             return data, labels, scaler
@@ -238,24 +230,12 @@ class ETFPredictor:
         """
         logging.info("Defining the LSTM model...")
         self.model = Sequential()
-        self.model.add(
-            LSTM(
-                X_train.shape[2],
-                activation="relu",
-                input_shape=(X_train.shape[1], X_train.shape[2]),
-                return_sequences=True,
-            )
-        )
-        self.model.add(
-            LSTM(
-                X_train.shape[2],
-                activation="relu",
-                input_shape=(X_train.shape[1], X_train.shape[2]),
-                return_sequences=True,
-            )
-        )
 
-        self.model.add(Dense(1, activation="sigmoid"))
+        self.model.add(
+            LSTM(128, return_sequences=True, input_shape=(self.input_seq_length, 44))
+        )
+        self.model.add(LSTM(64, return_sequences=True))
+        self.model.add(Dense(1, activation="linear"))
 
         # Compile the model
         self.model.compile(
@@ -265,7 +245,7 @@ class ETFPredictor:
         # Define early stopping
         early_stopping = EarlyStopping(
             monitor="val_loss" if validate else "loss",
-            patience=10,
+            patience=8,
             mode="min",
             restore_best_weights=True,
         )
@@ -276,7 +256,7 @@ class ETFPredictor:
             history = self.model.fit(
                 X_train,
                 y_train,
-                epochs=500,
+                epochs=5000,
                 validation_data=(X_test, y_test) if validate else None,
                 verbose=1,
                 callbacks=[early_stopping],
@@ -287,6 +267,8 @@ class ETFPredictor:
             raise
         else:
             logging.info("Model training completed.")
+            self.model_metadata = self.model.summary()
+            print(self.model_metadata)
             return history
 
     def _predict(
@@ -294,6 +276,8 @@ class ETFPredictor:
         predict_data: pd.DataFrame,
         scaler: MinMaxScaler,
         label_scaler: MinMaxScaler,
+        input_sequence_length: int = 14,  # default values
+        output_sequence_length: int = 14,  # default values
     ) -> np.ndarray:
         """
         Generate predictions with the trained model
@@ -302,28 +286,36 @@ class ETFPredictor:
             predict_data (pd.DataFrame): Data to predict
             scaler (MinMaxScaler): Fitted scaler for feature renormalization
             label_scaler (MinMaxScaler): Fitted scaler for label renormalization
+            input_sequence_length (int): Length of input sequences
+            output_sequence_length (int): Length of output sequences
 
         Returns:
             np.ndarray: Predictions
         """
         logging.info("Making predictions...")
         try:
+            # Set date as index and sort
             predict_data = predict_data.set_index("date")
             predict_data.sort_index()
             predict_data.dropna(inplace=True)
-
-            predict_data = np.expand_dims(scaler.transform(predict_data), axis=1)
-            y_pred = self.model.predict(predict_data)
-
-            # Inverse transformation
-            y_pred = y_pred.reshape(y_pred.shape[0], -1)
-            y_pred = label_scaler.inverse_transform(y_pred)
+            # Scale the features
+            predict_data_scaled = scaler.transform(predict_data)
+            # Create batches for predictions
+            total_sequences = len(predict_data) - input_sequence_length + 1
+            input_batches = np.zeros(
+                (total_sequences, input_sequence_length, predict_data.shape[1])
+            )
+            for i in range(total_sequences):
+                input_batches[i] = predict_data_scaled[i : i + input_sequence_length]
+            # Predict
+            y_pred = self.model.predict(input_batches)
+            # We might be predicting multiple values (output_sequence_length) for a single input sequence
+            y_pred_reshaped = y_pred.reshape(y_pred.shape[0] * y_pred.shape[1], -1)
+            y_pred_inverse_scaled = label_scaler.inverse_transform(y_pred_reshaped)
+            return y_pred_inverse_scaled
         except Exception as e:
             logging.error(f"Failed to make predictions due to {e}.")
             raise
-        else:
-            logging.info("Predictions made successfully.")
-            return y_pred
 
     def _store_predictions(self, predictions_df: pd.DataFrame, model_id: int) -> None:
         """
@@ -367,6 +359,7 @@ class ETFPredictor:
                     "loss": [min(history.history["loss"])],
                     "features": [", ".join(self.table_names)],
                     "days_forecast": [self.days_forecast],
+                    "model_summary": [self.model_metadata],
                 }
             )
             model_id = db_connector.insert_and_return_id(
@@ -417,7 +410,7 @@ class ETFPredictor:
 
 if __name__ == "__main__":
     tables = [endpoint.lower() for endpoint in endpoints.keys()]
-    data_refresh(os.getenv("FRED_API_KEY"))
+    # data_refresh(os.getenv("FRED_API_KEY"))
     for etf in etfs:
         predictor = ETFPredictor(
             table_names=tables, etf_symbol=etf, days_forecast=7 * 52

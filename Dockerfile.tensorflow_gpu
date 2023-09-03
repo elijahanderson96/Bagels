@@ -10,10 +10,8 @@ COPY requirements.txt ./requirements.txt
 # install the requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY ./etf_predictor.py /app/
-COPY ./database.py /app/
-COPY ./pipeline_metadata.yml /app
+COPY . .
 
-COPY ./scripts /app/scripts
+ENV PYTHONPATH=/app
 # set the default command to execute the Python script
-CMD ["python3", "etf_predictor.py"]
+CMD ["python3", "scripts/etf_predictor.py"]

@@ -47,8 +47,7 @@ def parse_sql_file(full_path, delimiter="-- @", name_delim="~"):
 
         ind_to_remove = ind_to_remove_comm + ind_to_remove_name
 
-        tmp_c_split = [i for j, i in enumerate(
-            tmp_c_split) if j not in ind_to_remove]
+        tmp_c_split = [i for j, i in enumerate(tmp_c_split) if j not in ind_to_remove]
 
         tmp_c_split = [i for j, i in enumerate(tmp_c_split) if i != ""]
 

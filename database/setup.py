@@ -22,6 +22,7 @@ models_columns = {
     "trained_from": "DATE",
     "trained_to": "DATE",
     "n_training_points": "INTEGER",
+    "model_summary": "TEXT",
     "date_trained": "DATE",
     "features": "TEXT",
     "loss": "REAL",
@@ -32,7 +33,14 @@ connector.create_table("models", models_columns, schema="models")
 
 connector.add_unique_key(
     "models",
-    ["date_trained", "features", "symbol", "days_forecast"],
+    [
+        "date_trained",
+        "features",
+        "symbol",
+        "days_forecast",
+        "model_summary",
+        "n_training_points",
+    ],
     "models_unique_key",
     schema="models",
 )

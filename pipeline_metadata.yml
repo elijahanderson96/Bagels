@@ -11,7 +11,7 @@ endpoints:
   BOGMBBM: "Monetary Base; Reserve Balances"
   M1SL: "M1 Money Supply"
   M2SL: "M2 Money Supply"
-  CSUSHPISA: "S&P/Case-Shiller U.S. National Home Price Index"
+  CSUSHPISA: "S&P/Case-Shiller U.noS. National Home Price Index"
   DGS1MO: "Market Yield on U.S. Treasury Securities at 1-Month Constant Maturity, Quoted on an Investment Basis"
   DGS3MO: "Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis"
   DGS6MO: "Market Yield on U.S. Treasury Securities at 6-Month Constant Maturity, Quoted on an Investment Basis"
