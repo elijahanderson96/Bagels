@@ -159,16 +159,4 @@ if __name__ == "__main__":
     etf_arg = config["etf"][0]
 
     fred = Fred()
-    # Fetch all releases
-    # Fetch release IDs for the series we're interested in
-    release_ids = [
-        fetch_release_id_for_series(endpoint) for endpoint in endpoints.keys()
-    ]
-    # Filter out any None values
-    release_ids = [rid for rid in release_ids if rid is not None]
-
-    # Fetch only the relevant release dates
-    release_dates_data = fetch_all_release_dates(list(set(release_ids)))
-    recent_dates = get_most_recent_dates(release_dates_data)
-
     data_refresh(fred, etf_arg, endpoints)
