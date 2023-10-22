@@ -1,13 +1,18 @@
 import datetime
 import logging
+import os
 import time
 
 import pandas as pd
+import requests
 import yaml
 import yfinance
 from fredapi import Fred
 
 from database.database import db_connector
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def load_config(filename: str) -> dict:
@@ -22,12 +27,8 @@ def load_config(filename: str) -> dict:
     """
     with open(filename, "r") as f:
         config = yaml.safe_load(f)
+
     return config
-
-
-config = load_config("pipeline_metadata.yml")
-endpoints = config["endpoints"]
-etfs = config["etfs"]
 
 
 def fetch_data(fred: Fred, endpoint: str) -> pd.DataFrame:
@@ -47,24 +48,25 @@ def fetch_data(fred: Fred, endpoint: str) -> pd.DataFrame:
     """
     # Sleep so we don't exceed API Usage calls.
     time.sleep(0.5)
-    series = pd.DataFrame(fred.get_series(endpoint))
+    series = pd.DataFrame(fred.get_series_latest_release(endpoint))
     series = series.resample("D").asfreq()
     series = series.interpolate(method="linear")
-
     series = series.reset_index()
     series.rename(columns={0: "value", "index": "date"}, inplace=True)
-
     return series
 
 
-def data_refresh(api_key: str) -> None:
+def data_refresh(fred: Fred, etf: str, endpoints: dict) -> None:
     """Refreshes financial data.
 
     Function to refresh financial data by making API calls to different endpoints and then storing the results in a
     database.
 
     Args:
-        api_key (str): FRED API key.
+        fred (Fred): An instance of the Fred class.
+        etf (str): The etf to get historical closing prices for.
+        endpoints (dict): This is the config, as a dict, of the endpoints from fred we are using as inputs
+        for predicting an etf's closing prices.
 
     Raises:
         Exception: If there is a failure in fetching the data from the API or inserting data into the database.
@@ -73,11 +75,21 @@ def data_refresh(api_key: str) -> None:
         >>> api_key = 'Your API Key'
         >>> data_refresh(api_key)
     """
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
     try:
-        fred = Fred(api_key=api_key)
+        all_release_dates = fetch_all_release_dates()
+        relevant_release_dates = [
+            rd for rd in all_release_dates if rd["release_name"] in endpoints.values()
+        ]
+        next_release_dates_df = pd.DataFrame(relevant_release_dates)
+
+        db_connector.insert_dataframe(
+            next_release_dates_df,
+            schema=etf.lower(),
+            name="next_release_dates",
+            if_exists="replace",
+            index=False,
+        )
+
         metadata = pd.DataFrame(
             data={
                 "id": range(0, len(endpoints)),
@@ -86,11 +98,14 @@ def data_refresh(api_key: str) -> None:
             }
         )
         db_kwargs = {
-            "schema": "data",
+            "schema": etf.lower(),
             "name": "endpoints",
             "if_exists": "replace",
             "index": False,
         }
+
+        db_connector.create_schema(etf.lower())
+
         db_connector.insert_dataframe(metadata, **db_kwargs)
 
         for endpoint in endpoints.keys():
@@ -101,23 +116,20 @@ def data_refresh(api_key: str) -> None:
 
         dfs = []
 
-        for etf in etfs:
-            logger.info(f"Grabbing {etf}.")
-            time.sleep(1)
-            df = yfinance.download(etf, end=datetime.datetime.now().date())
-            df["symbol"] = etf
-            df.reset_index(inplace=True)
-            [
-                df.rename(columns={col: col.replace(" ", "_").lower()}, inplace=True)
-                for col in df.columns.to_list()
-            ]
-            dfs.append(df)
+        logger.info(f"Grabbing {etf}.")
+        time.sleep(1)
+        df = yfinance.download(etf, end=datetime.datetime.now().date())
+        df["symbol"] = etf
+        df.reset_index(inplace=True)
+        columns = {col: col.replace(" ", "_").lower() for col in df.columns.to_list()}
+        df.rename(columns=columns, inplace=True)
+        dfs.append(df)
 
         df = pd.concat(dfs)
         db_connector.insert_dataframe(
             df,
-            schema="data",
-            name="historical_prices",
+            schema=etf.lower(),
+            name=f"{etf.lower()}_historical_prices",
             if_exists="replace",
             index=False,
         )
@@ -128,6 +140,35 @@ def data_refresh(api_key: str) -> None:
 
 
 if __name__ == "__main__":
-    # Your FRED API Key
-    api_key = "7f54d62f0a53c2b106b903fc80ecace1"
-    data_refresh(api_key)
+    import argparse
+
+    api_key = os.getenv("FRED_API_KEY")
+
+    parser = argparse.ArgumentParser(
+        description="Fetch data based on ETF feature mapping configuration."
+    )
+    parser.add_argument("--etf", type=str, help="The ETF we are sourcing data for.")
+    args = parser.parse_args()
+    etf_arg = args.etf
+
+    mapping = {"SPY": "spy.yml", "QQQ": "qqq.yml", "AGG": "agg.yml"}
+    file_path = f"./etf_feature_mappings/{mapping[etf_arg]}"
+    config = load_config(filename=file_path)
+
+    endpoints = config["endpoints"]
+    etf_arg = config["etf"][0]
+
+    fred = Fred()
+    # Fetch all releases
+    # Fetch release IDs for the series we're interested in
+    release_ids = [
+        fetch_release_id_for_series(endpoint) for endpoint in endpoints.keys()
+    ]
+    # Filter out any None values
+    release_ids = [rid for rid in release_ids if rid is not None]
+
+    # Fetch only the relevant release dates
+    release_dates_data = fetch_all_release_dates(list(set(release_ids)))
+    recent_dates = get_most_recent_dates(release_dates_data)
+
+    data_refresh(fred, etf_arg, endpoints)

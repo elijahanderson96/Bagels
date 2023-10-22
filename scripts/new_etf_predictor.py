@@ -21,7 +21,7 @@ from scripts.ingestion_fred import endpoints
 
 class DatasetBuilder:
     def __init__(
-            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
+        self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
@@ -31,7 +31,7 @@ class DatasetBuilder:
         logging.info("Fetching data from tables...")
         try:
             dfs = [
-                db_connector.run_query(f"SELECT * FROM data.{table}")
+                db_connector.run_query(f"SELECT * FROM {self.etf_symbol}.{table}")
                 for table in self.table_names
             ]
             for table, df in dict(zip(self.table_names, dfs)).items():
@@ -44,7 +44,7 @@ class DatasetBuilder:
             return dfs
 
     def _align_dates(
-            self, df_list: List[pd.DataFrame], date_column: str
+        self, df_list: List[pd.DataFrame], date_column: str
     ) -> pd.DataFrame:
         logging.info("Aligning dates across dataframes...")
         try:
@@ -86,7 +86,7 @@ class DatasetBuilder:
             return labels_df
 
     def _split_data(
-            self, features_df: pd.DataFrame, labels_df: pd.DataFrame, days_ahead: int = 1
+        self, features_df: pd.DataFrame, labels_df: pd.DataFrame, days_ahead: int = 1
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.info("Splitting data into training and prediction sets...")
         try:
@@ -118,10 +118,10 @@ class DatasetBuilder:
             predict_df = features_df[
                 (features_df["date"] > last_training_date)
                 & (
-                        features_df["date"]
-                        <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
+                    features_df["date"]
+                    <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
                 )
-                ]
+            ]
 
         except Exception as e:
             logging.error(f"Failed to split data due to {e}.")
@@ -140,7 +140,13 @@ class DatasetBuilder:
 
 class ETFPredictor:
     def __init__(
-            self, train_data, predict_data, sequence_length=28, epochs=1000, batch_size=32, stride=1
+        self,
+        train_data,
+        predict_data,
+        sequence_length=28,
+        epochs=1000,
+        batch_size=32,
+        stride=1,
     ):
         self.train_data = train_data.sort_values(by="date")
         self.predict_data = predict_data.sort_values(by="date")
@@ -154,23 +160,33 @@ class ETFPredictor:
 
     def _build_model(self):
         model = Sequential()
-        model.add(LSTM(units=25, return_sequences=True, input_shape=(self.sequence_length, 11)))
-        model.add(Dropout(0.2))
-        model.add(LSTM(units=10, return_sequences=True))
-        model.add(LSTM(units=5))
-        model.add(Dense(units=self.sequence_length))
-        model.compile(optimizer=Adam(learning_rate=0.01), loss="mean_absolute_error"
+        model.add(
+            LSTM(
+                units=20, return_sequences=True, input_shape=(self.sequence_length, 16)
+            )
         )
+        model.add(Dropout(0.15))
+        model.add(LSTM(units=15, return_sequences=True))
+        model.add(Dropout(0.15))
+        model.add(LSTM(units=10))
+        model.add(Dense(units=self.sequence_length))
+        model.compile(optimizer=Adam(learning_rate=0.002), loss="mean_absolute_error")
         return model
 
-    def preprocess_data(self, split_ratio=.8, validate=True):
+    def preprocess_data(self, split_ratio=0.9, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values
         y = self.train_data["close"].values
         X = self.scaler.fit_transform(X)
 
-        sequences = [X[i: i + self.sequence_length] for i in range(0, len(X) - self.sequence_length, self.stride)]
+        sequences = [
+            X[i : i + self.sequence_length]
+            for i in range(0, len(X) - self.sequence_length, self.stride)
+        ]
         X = np.array(sequences)
-        y_sequences = [y[i: i + self.sequence_length] for i in range(0, len(y) - self.sequence_length, self.stride)]
+        y_sequences = [
+            y[i : i + self.sequence_length]
+            for i in range(0, len(y) - self.sequence_length, self.stride)
+        ]
         y = np.array(y_sequences)
 
         if validate:
@@ -186,29 +202,60 @@ class ETFPredictor:
     def train(self, validate=True):
         X_train, y_train, X_val, y_val = self.preprocess_data(validate=validate)
         early_stop = EarlyStopping(
-            monitor='val_loss' if validate else 'loss', patience=25, verbose=1, restore_best_weights=True
-            )
+            monitor="val_loss" if validate else "loss",
+            patience=75,
+            verbose=1,
+            restore_best_weights=True,
+        )
         if validate:
             self.model.fit(
-                X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, validation_data=(X_val, y_val),
-                callbacks=[early_stop]
-                )
+                X_train,
+                y_train,
+                epochs=self.epochs,
+                batch_size=self.batch_size,
+                validation_data=(X_val, y_val),
+                callbacks=[early_stop],
+            )
         else:
-            self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, callbacks=[early_stop])
+            self.model.fit(
+                X_train,
+                y_train,
+                epochs=self.epochs,
+                batch_size=self.batch_size,
+                callbacks=[early_stop],
+            )
 
-    def predict(self, future_days=28):
-        last_sequence = self.scaler.transform(self.predict_data.drop(columns=["date", "offset_date"]).values)[-self.sequence_length:]
-        last_sequence = last_sequence.reshape((1, self.sequence_length, 11))
+    def predict(self):
+        last_sequence = self.scaler.transform(
+            self.predict_data.drop(columns=["date", "offset_date"]).values
+        )[-self.sequence_length :]
+        last_sequence = last_sequence.reshape((1, self.sequence_length, 16))
         predicted_sequence = self.model.predict(last_sequence)[0]
         dates_predict = self.predict_data["date"].iloc[-1]
-        future_dates = pd.date_range(start=dates_predict, periods=future_days + 1)[1:]
-        prediction_df = pd.DataFrame({"Date": future_dates, "Predicted_Close": predicted_sequence})
+        future_dates = pd.date_range(
+            start=dates_predict, periods=self.sequence_length + 1
+        )[1:]
+        prediction_df = pd.DataFrame(
+            {"Date": future_dates, "Predicted_Close": predicted_sequence}
+        )
 
         return prediction_df
 
 
+# if run as main, we should look for command line arguments including but not limited to:
+# etf_symbol (ETF we're trying to predict), number of days in advance we're trying to predict (default of 7 days),
+# sequence length, epochs, batch_size, stride, etc.
+# We also need to remove the from ingestion_fred import endpoints (which parses a yaml file) and just include
+# the same logic here since that script is arg parsed as well as this one.
+
+# We also could use a feature in the future that looks for events that may result in larger than usual
+# volatily, such as a cpi release, or gdp report. Knowing when these reports are released will be
+# crucial to reliable prediction and trading.
+
+# We need some logic that checks if data is outdated.
+
 tables = [endpoint.lower() for endpoint in endpoints.keys()]
-self = DatasetBuilder(table_names=tables, etf_symbol="AGG", forecast_n_days_ahead=28)
+self = DatasetBuilder(table_names=tables, etf_symbol="SPY", forecast_n_days_ahead=7)
 train_data, predict_data = self.build_datasets()
 train_data.drop(columns="date_label", inplace=True)
 
@@ -217,12 +264,12 @@ train_data.drop(columns="date_label", inplace=True)
 self = ETFPredictor(
     train_data=train_data,
     predict_data=predict_data,
-    sequence_length=28,
-    epochs=20000,
-    batch_size=1,
-    stride=28
+    sequence_length=7,
+    epochs=2000,
+    batch_size=4,
+    stride=1,
 )
 self.train(validate=True)
-predictions = self.predict(future_days=28)
+predictions = self.predict()
 
 print(predictions)
