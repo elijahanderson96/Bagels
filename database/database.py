@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.sql import Composed
 from sqlalchemy import create_engine, inspect
+
 from config.configs import db_config
 
 

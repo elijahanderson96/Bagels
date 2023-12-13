@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 import requests
 
@@ -6,6 +7,7 @@ from database.database import db_connector
 from scripts.ingestion_fred import load_config
 
 FRED_API_BASE_URL = "https://api.stlouisfed.org/fred"
+
 
 def get_series_code_for_release(release_id):
     endpoint = f"{FRED_API_BASE_URL}/release/series"
@@ -18,6 +20,7 @@ def get_series_code_for_release(release_id):
     data = response.json()
 
     return pd.DataFrame(data["seriess"])
+
 
 def fetch_release_id_for_series(series_code):
     endpoint = f"{FRED_API_BASE_URL}/series/release"
@@ -74,7 +77,10 @@ def update_release_schedule_for_schema(schema_name: str, release_data_df: pd.Dat
         current_data = db_connector.run_query(query, (endpoint,))
         print(current_data)
         if not current_data.empty:
-            current_release_id, current_release_date = current_data.iloc[0,0], current_data.iloc[0,1]
+            current_release_id, current_release_date = (
+                current_data.iloc[0, 0],
+                current_data.iloc[0, 1],
+            )
             if release_date > current_release_date or release_id != current_release_id:
                 update_query = f"""
                 UPDATE {schema_name}.release_schedule 
@@ -92,6 +98,7 @@ def update_release_schedule_for_schema(schema_name: str, release_data_df: pd.Dat
             db_connector.run_query(
                 insert_query, (endpoint, release_id, release_date), return_df=False
             )
+
 
 def check_and_create_release_schedule(schema_name: str):
     """

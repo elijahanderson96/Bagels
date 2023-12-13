@@ -4,7 +4,6 @@ import os
 import time
 
 import pandas as pd
-import requests
 import yaml
 import yfinance
 from fredapi import Fred
@@ -76,19 +75,19 @@ def data_refresh(fred: Fred, etf: str, endpoints: dict) -> None:
         >>> data_refresh(api_key)
     """
     try:
-        all_release_dates = fetch_all_release_dates()
-        relevant_release_dates = [
-            rd for rd in all_release_dates if rd["release_name"] in endpoints.values()
-        ]
-        next_release_dates_df = pd.DataFrame(relevant_release_dates)
-
-        db_connector.insert_dataframe(
-            next_release_dates_df,
-            schema=etf.lower(),
-            name="next_release_dates",
-            if_exists="replace",
-            index=False,
-        )
+        #    all_release_dates = fetch_all_release_dates()
+        #    relevant_release_dates = [
+        #        rd for rd in all_release_dates if rd["release_name"] in endpoints.values()
+        #    ]
+        #    next_release_dates_df = pd.DataFrame(relevant_release_dates)
+        #
+        #    db_connector.insert_dataframe(
+        #        next_release_dates_df,
+        #        schema=etf.lower(),
+        #        name="next_release_dates",
+        #        if_exists="replace",
+        #        index=False,
+        #    )
 
         metadata = pd.DataFrame(
             data={

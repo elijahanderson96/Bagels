@@ -1,4 +1,5 @@
 fredapi
+fastapi
 pandas
 psycopg2-binary
 requests
