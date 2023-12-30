@@ -12,7 +12,7 @@ endpoints:
   TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
   TERMCBCCALLNS: "Commercial Bank Interest Rate on Credit Card Plans, All Accounts"
   DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
-  VIXCLS:  "Volatility Index VIX"
+
 etf:
-  - "SPY"
+  - "SCHD"
 

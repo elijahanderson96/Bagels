@@ -1,12 +1,14 @@
 import logging
 from datetime import timedelta
 from functools import reduce
-from typing import List, Tuple
+from typing import List
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 from keras.callbacks import EarlyStopping
-from keras.layers import LSTM, Dense, Dropout
+from keras.layers import Dense
+from keras.layers import LSTM
 from keras.models import Sequential
 from keras.src.optimizers import Adam
 from sklearn.preprocessing import StandardScaler
@@ -14,10 +16,13 @@ from sklearn.preprocessing import StandardScaler
 from database.database import db_connector
 from scripts.ingestion_fred import load_config
 
+# Basic configuration for logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class DatasetBuilder:
     def __init__(
-        self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
+            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
@@ -42,7 +47,7 @@ class DatasetBuilder:
             return dfs
 
     def _align_dates(
-        self, df_list: List[pd.DataFrame], date_column: str
+            self, df_list: List[pd.DataFrame], date_column: str
     ) -> pd.DataFrame:
         logging.info("Aligning dates across dataframes...")
         try:
@@ -85,9 +90,9 @@ class DatasetBuilder:
             return labels_df
 
     def _split_data(
-        self,
-        features_df: pd.DataFrame,
-        labels_df: pd.DataFrame,
+            self,
+            features_df: pd.DataFrame,
+            labels_df: pd.DataFrame,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.info("Splitting data into training and prediction sets...")
         try:
@@ -113,10 +118,10 @@ class DatasetBuilder:
             predict_df = features_df[
                 (features_df["date"] > last_training_date)
                 & (
-                    features_df["date"]
-                    <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
+                        features_df["date"]
+                        <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
                 )
-            ]
+                ]
 
         except Exception as e:
             logging.error(f"Failed to split data due to {e}.")
@@ -135,13 +140,14 @@ class DatasetBuilder:
 
 class ETFPredictor:
     def __init__(
-        self,
-        train_data,
-        predict_data,
-        sequence_length=28,
-        epochs=1000,
-        batch_size=32,
-        stride=1,
+            self,
+            train_data,
+            predict_data,
+            sequence_length=28,
+            epochs=1000,
+            batch_size=32,
+            stride=1,
+            window_length=None
     ):
         self.train_data = train_data.sort_values(by="date")
         self.predict_data = predict_data.sort_values(by="date")
@@ -149,38 +155,55 @@ class ETFPredictor:
         self.epochs = epochs
         self.batch_size = batch_size
         self.stride = stride
+        self.window_length = window_length
 
         self.scaler = StandardScaler()
         self.model = self._build_model()
+
+        # Log the current arguments
+        logging.info(
+            f"Initialized ETFPredictor with sequence_length={sequence_length}, "
+            f"epochs={epochs}, batch_size={batch_size}, stride={stride}"
+        )
+
+        logging.info(f"Training data is of size {train_data.shape} and prediction is of size {predict_data.shape}")
 
     def _build_model(self):
         model = Sequential()
         model.add(
             LSTM(
-                units=12,
+                units=self.train_data.shape[1],
                 return_sequences=True,
                 input_shape=(self.sequence_length, self.train_data.shape[1] - 2),
             )
         )
-        model.add(Dropout(0.10))
-        model.add(LSTM(units=10, return_sequences=False))
+        model.add(LSTM(units=self.train_data.shape[1] // 2, return_sequences=False))
         model.add(Dense(units=1))
-        model.compile(optimizer=Adam(learning_rate=0.002), loss="mean_absolute_error")
+        model.compile(optimizer=Adam(learning_rate=0.001), loss="mean_squared_error")
+        logging.info(model.summary())
         return model
 
     def preprocess_data(self, split_ratio=0.9, validate=True):
-        X = self.train_data.drop(columns=["date", "close"]).values
-        y = self.train_data["close"].values
+        X = self.train_data.drop(columns=["date", "close"]).values if not self.window_length else self.train_data.drop(
+            columns=["date", "close"]
+            ).values[-self.window_length:]
+        y = self.train_data["close"].values if not self.window_length else self.train_data["close"].values[
+                                                                           -self.window_length:]
+
         X = self.scaler.fit_transform(X)
 
+        # Scale labels
+        y = y[self.sequence_length:]  # Align y with the sequences
+        y = y.reshape(-1, 1)  # Reshape for scaling
+
+        self.label_scaler = StandardScaler()  # Create a new scaler for labels
+        y = self.label_scaler.fit_transform(y)
+
         sequences = [
-            X[i : i + self.sequence_length]
+            X[i: i + self.sequence_length]
             for i in range(0, len(X) - self.sequence_length)
         ]
         X = np.array(sequences)
-        y = y[
-            self.sequence_length :
-        ]  # Now y contains the next value after each sequence
 
         if validate:
             split_idx = int(split_ratio * len(X))
@@ -219,63 +242,68 @@ class ETFPredictor:
             )
 
     def predict(self):
-        last_sequence = self.scaler.transform(
-            self.predict_data.drop(columns=["date"]).values
-        )[-self.sequence_length :]
-        last_sequence = last_sequence.reshape(
-            (1, self.sequence_length, self.train_data.shape[1] - 2)
-        )
-        predicted_close = self.model.predict(last_sequence)[0][
-            0
-        ]  # Just one predicted value
-        dates_predict = self.predict_data["date"].iloc[-1]
+        # Prepare the last sequence for prediction
+        last_sequence = self.predict_data.drop(columns=["date", "offset_date"]).values[-self.sequence_length:]
+        last_sequence = self.scaler.transform(last_sequence)
+
+        # Reshape the sequence to match the input shape expected by the model
+        last_sequence = last_sequence.reshape((1, self.sequence_length, self.train_data.shape[1] - 2))
+
+        # Use the model to predict the next value
+        predicted_close = self.model.predict(last_sequence)[0][0]
+
+        # If label scaling was used, inverse transform the prediction
+        predicted_close = self.label_scaler.inverse_transform([[predicted_close]])[0][0]
+
+        # Handling the date for the prediction
+        dates_predict = self.predict_data["offset_date"].iloc[-1]
         future_date = dates_predict + timedelta(days=1)
-        prediction_df = pd.DataFrame(
-            {"Date": [future_date], "Predicted_Close": [predicted_close]}
-        )
+        prediction_df = pd.DataFrame({"Date": [future_date], "Predicted_Close": [predicted_close]})
 
         return prediction_df
 
     def _rolling_train(self, train_window):
         """Trains the model on a rolling window from train_window."""
+        # Extract features and target
         X = train_window.drop(columns=["date", "close"]).values
-        y = train_window["close"].values[1:]  # We're shifting y by one step
+        y = train_window["close"].values
 
+        # Scale features
         X = self.scaler.fit_transform(X)
+
+        # Create sequences for LSTM
         sequences = [
-            X[i : i + self.sequence_length]
-            for i in range(len(X) - self.sequence_length - 1)
+            X[i: i + self.sequence_length]
+            for i in range(len(X) - self.sequence_length)
         ]
         X = np.array(sequences)
 
-        y = y[self.sequence_length :]  # Match the shifted y size with X size
+        # Scale labels
+        y = y[self.sequence_length:]  # Align y with the sequences
+        y = y.reshape(-1, 1)  # Reshape for scaling
+        self.label_scaler = StandardScaler()  # Create a new scaler for labels
+        y = self.label_scaler.fit_transform(y)
+
+        # Fit the model
         self.model.fit(
-            X,
-            y,
-            epochs=self.epochs,
-            batch_size=self.batch_size,
-            verbose=1,
-            use_multiprocessing=True,
+            X, y, epochs=self.epochs, batch_size=self.batch_size, verbose=1, use_multiprocessing=True
         )
 
     def _sequence_predict(self, X):
-        # Ensure the input is reshaped to (1, sequence_length, number of features)
+        """Predicts the next value in the sequence."""
+        # Ensure the input is correctly shaped
         if X.shape != (1, self.sequence_length, self.train_data.shape[1] - 2):
             raise ValueError(
                 f"Expected X to have a shape of (1, {self.sequence_length}, {self.train_data.shape[1] - 2})."
             )
 
+        # Get the prediction from the model
         prediction = self.model.predict(X)
 
-        # Prepare the input for inverse transformation
-        inverse_input = np.zeros((1, self.train_data.shape[1] - 2))
-        inverse_input[:, :-1] = X[:, -1, :-1]
-        inverse_input[:, -1] = prediction.ravel()
+        # Inverse transform the prediction to get it back on the original scale
+        predicted_value = self.label_scaler.inverse_transform(prediction)
 
-        # Denormalize the prediction
-        predicted_value = self.scaler.inverse_transform(inverse_input)[:, -1]
-
-        return predicted_value[0]
+        return predicted_value[0][0]  # Return the scalar value
 
     def backtest(self, window_length=1000, overlap=500, days_ahead=7):
         """
@@ -292,10 +320,10 @@ class ETFPredictor:
             raise ValueError("Overlap should be less than window length.")
 
         step_size = (
-            window_length - overlap
+                window_length - overlap
         )  # This determines the number of new days introduced in each window.
         n_windows = (len(self.train_data) - window_length) // step_size
-
+        print(f'The step size is {step_size}, and there are {n_windows} windows we will be training over.')
         if n_windows <= 0:
             raise ValueError("Insufficient data for given window length and overlap.")
 
@@ -309,19 +337,17 @@ class ETFPredictor:
             # the next_data is the real value n_days ahead that we are trying to predict which will be used
             # to measure how good our model is
             next_data = self.train_data.iloc[
-                end_idx + days_ahead : end_idx + days_ahead + 1
-            ]
-            print(train_window)
-            print(next_data)
+                        end_idx + days_ahead: end_idx + days_ahead + 1
+                        ]
+
             if next_data.empty:
                 continue
 
             self._rolling_train(train_window)
-            print("Heres the prediction sequence below:")
-            print(self.train_data.iloc[end_idx - self.sequence_length : end_idx])
+
             # Extract the feature matrix from next_data and predict the next value
             sequence = (
-                self.train_data.iloc[end_idx - self.sequence_length : end_idx]
+                self.train_data.iloc[end_idx - self.sequence_length: end_idx]
                 .drop(columns=["date", "close"])
                 .values
             )
@@ -337,6 +363,7 @@ class ETFPredictor:
             print(f"predicted_value: {predicted_value}", f"true_value: {true_value}")
             self.model = self._build_model()  # Reset the model for the next iteration
 
+        print(errors)
         mean_absolute_error = np.mean(errors)
         return mean_absolute_error
 
@@ -344,31 +371,45 @@ class ETFPredictor:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Build model for a given ETF with specified arguments"
-    )
-    parser.add_argument("--etf", type=str, help="The ETF we are sourcing data for.")
-    parser.add_argument(
-        "--days_ahead",
-        type=int,
-        default=7,
-        help="How many days ahead are we forecasting?",
-    )
-    parser.add_argument(
-        "--backtest", action="store_true", help="Are we back testing a model?"
-    )
+    # Create the parser
+    parser = argparse.ArgumentParser(description="Build model for a given ETF with specified arguments")
 
+    # Add arguments
+    parser.add_argument("--etf", type=str, help="The ETF we are sourcing data for.")
+    parser.add_argument("--days_ahead", type=int, default=182, help="How many days ahead are we forecasting?")
+    parser.add_argument("--backtest", action="store_true", help="Are we back testing a model?")
+    parser.add_argument("--sequence_length", type=int, default=28, help="Input sequence length for the model.")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training the model.")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for model training.")
+    parser.add_argument("--stride", type=int, default=14, help="Stride for training data preparation.")
+    parser.add_argument(
+        "--window_length", type=int, default=None, help="Length of the training window for backtesting."
+    )
+    parser.add_argument(
+        "--overlap", type=int, default=2500, help="Number of overlapping days in the training window for backtesting."
+    )
+    parser.add_argument("--validate", action="store_true", help="Enable validation during training.")
+
+    # Parse the arguments
     args = parser.parse_args()
+
+    # Extracting arguments
     etf_arg = args.etf
     days_ahead = args.days_ahead
     backtest = args.backtest
+    sequence_length = args.sequence_length
+    epochs = args.epochs
+    batch_size = args.batch_size
+    stride = args.stride
+    window_length = args.window_length
+    overlap = args.overlap
 
-    mapping = {"SPY": "spy.yml", "QQQ": "qqq.yml", "AGG": "agg.yml"}
-    file_path = f"./etf_feature_mappings/{mapping[etf_arg]}"
+    file_path = f"./etf_feature_mappings/{etf_arg.lower()}.yml"
     config = load_config(filename=file_path)
     endpoints = config["endpoints"]
 
     tables = [endpoint.lower() for endpoint in endpoints.keys()]
+
     self = DatasetBuilder(
         table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead
     )
@@ -377,36 +418,31 @@ if __name__ == "__main__":
     train_data.drop(columns="date_label", inplace=True)
 
     if args.backtest:
-        predictor = ETFPredictor(
+        self = ETFPredictor(
             train_data=train_data,
             predict_data=predict_data,
-            sequence_length=14,  # this is the input sequence length, we predict the price n_days ahead.
-            epochs=100,
-            batch_size=4,
-            stride=7,
+            sequence_length=args.sequence_length,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            stride=args.stride,
         )
 
         # Backtest the predictor with overlapping windows:
-        mae = predictor.backtest(window_length=1000, overlap=250, days_ahead=days_ahead)
+        mae = self.backtest(window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead)
 
         print(f"Mean Absolute Error during backtesting: {mae}")
 
     else:
-        predictor = ETFPredictor(train_data=train_data, predict_data=predict_data)
-        predictor.train(validate=True)
-        predictions = predictor.predict()
-
-        print(predictions)
-        # Usage:
-        self = ETFPredictor(
+        predictor = ETFPredictor(
             train_data=train_data,
             predict_data=predict_data,
-            sequence_length=7,
-            epochs=2000,
-            batch_size=4,
-            stride=1,
+            sequence_length=args.sequence_length,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            stride=args.stride,
+            window_length=window_length
         )
-        self.train(validate=True)
-        predictions = self.predict()
+        predictor.train(validate=args.validate)
+        predictions = predictor.predict()
 
         print(predictions)

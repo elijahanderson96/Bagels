@@ -5,10 +5,14 @@
 from config.configs import db_config
 from database.database import PostgreSQLConnector
 
+import logging
+
 
 class BagelsORM(PostgreSQLConnector):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+    def login(self, user):
 
 
 orm = BagelsORM(**db_config)

@@ -150,8 +150,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     etf_arg = args.etf
 
-    mapping = {"SPY": "spy.yml", "QQQ": "qqq.yml", "AGG": "agg.yml"}
-    file_path = f"./etf_feature_mappings/{mapping[etf_arg]}"
+    file_path = f"./etf_feature_mappings/{etf_arg.lower()}.yml"
     config = load_config(filename=file_path)
 
     endpoints = config["endpoints"]
