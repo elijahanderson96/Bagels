@@ -1,67 +1,54 @@
-import pandas as pd
-from etf_predictor import DatasetBuilder, ETFPredictor
 import argparse
 import itertools
+import subprocess
+from concurrent.futures import ProcessPoolExecutor
 
-from scripts.ingestion_fred import load_config
 
-
-def grid_search(train_data, predict_data, params):
-    results_list = []  # A list to store individual results
-
-    for epoch, batch_size, stride in itertools.product(*params.values()):
-        predictor = ETFPredictor(
-            train_data=train_data,
-            predict_data=predict_data,
-            sequence_length=28,  # Adjust as needed
-            epochs=epoch,
-            batch_size=batch_size,
-            stride=stride
-        )
-        mae = predictor.backtest(window_length=3000, overlap=2500, days_ahead=182)  # Adjust as needed
-        results_list.append({'Epochs': epoch, 'Batch_Size': batch_size, 'Stride': stride, 'MAE': mae})
-
-    results = pd.DataFrame(results_list)  # Convert the list of dictionaries to a DataFrame
-    return results
+def spawn_training_process(params, etf):
+    # Convert parameters to command line arguments
+    command = [
+        "python", "scripts/etf_predictor.py",
+        "--etf", etf,
+        "--days_ahead", str(params['Days_Ahead']),
+        "--sequence_length", str(params['Sequence_Length']),
+        "--epochs", str(params['Epochs']),  # Fixed number of epochs
+        "--batch_size", str(params['Batch_Size']),  # Fixed batch size
+        "--stride", str(1),  # Stride is half of the sequence length
+        "--window_length", str(params['Window_Length']),
+        "--overlap", str(params['Window_Length'] - 250),  # No overlap
+        "--backtest"  # Backtest flag
+    ]
+    subprocess.run(command)  # Using run for synchronous execution
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Search for best model configurations.")
-    parser.add_argument("--etf", type=str, required=True, help="The ETF we are sourcing data for.")
-
+    parser = argparse.ArgumentParser(description="Find Best Model Configuration")
+    parser.add_argument("--etf", type=str, required=True, help="ETF symbol for the model")
     args = parser.parse_args()
-
-    # Load data
-    file_path = f"./etf_feature_mappings/{args.etf.lower()}.yml"
-    config = load_config(filename=file_path)
-    endpoints = config["endpoints"]
-
-    tables = [endpoint.lower() for endpoint in endpoints.keys()]
-    dataset_builder = DatasetBuilder(table_names=tables, etf_symbol=args.etf, forecast_n_days_ahead=182)
-    train_data, predict_data = dataset_builder.build_datasets()
-    train_data.drop(columns="date_label", inplace=True)
+    etf = args.etf
 
     # Define the range of parameters for grid search
     params = {
-        'Epochs': [10, 50, 100],
-        'Batch_Size': [8, 16, 32],
-        'Stride': [7, 14, 21]
+        'Days_Ahead': [112, 140, 210, 280],
+        'Sequence_Length': [28, 56, 112, 224],
+        'Window_Length': [1000, 1500, 2000],
+        'Batch_Size': [32, 64],
+        'Epochs': [5000],
     }
 
-    # Run grid search
-    search_results = grid_search(train_data, predict_data, params)
+    # Using ProcessPoolExecutor to manage concurrent processes
+    with ProcessPoolExecutor(max_workers=2) as executor:  # Adjust max_workers based on your system
+        futures = []
+        for param_set in itertools.product(*params.values()):
+            param_dict = dict(zip(params.keys(), param_set))
+            future = executor.submit(spawn_training_process, param_dict, etf)
+            futures.append(future)
 
-    # Identify the best configuration
-    best_idx = search_results['MAE'].idxmin()
-    search_results['Best_Config'] = ['Yes' if idx == best_idx else 'No' for idx in search_results.index]
+        # Wait for all futures to complete
+        for future in futures:
+            future.result()
 
-    # Save results to CSV
-    search_results.to_csv('model_search_results.csv', index=False)
-
-    print("Grid search completed. Results saved to model_search_results.csv.")
-    print(
-        f"Best configuration (Epochs: {search_results.loc[best_idx, 'Epochs']}, Batch Size: {search_results.loc[best_idx, 'Batch_Size']}, Stride: {search_results.loc[best_idx, 'Stride']}) with MAE: {search_results.loc[best_idx, 'MAE']}"
-        )
+    print("Grid search completed.")
 
 
 if __name__ == "__main__":

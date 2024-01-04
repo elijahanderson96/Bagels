@@ -1,4 +1,6 @@
 import logging
+import os
+from datetime import datetime
 from datetime import timedelta
 from functools import reduce
 from typing import List
@@ -22,11 +24,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class DatasetBuilder:
     def __init__(
-            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14
+            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14, sequence_length: int = 14
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
         self.forecast_n_days_ahead = forecast_n_days_ahead
+        self.sequence_length = sequence_length
 
     def _get_data_from_tables(self) -> List[pd.DataFrame]:
         logging.info("Fetching data from tables...")
@@ -110,18 +113,23 @@ class DatasetBuilder:
             )
             data_df.drop(columns=["offset_date"], inplace=True)
 
-            # Split the data
-            last_training_date = features_df["date"].max() - timedelta(
-                days=self.forecast_n_days_ahead
-            )
-            train_df = data_df[data_df["date"] <= last_training_date]
+            # Determine the last available date in features_df
+            last_available_date = features_df["date"].max()
+
+            # Training Data: Data up to the last available date minus forecast_n_days_ahead
+            train_df = data_df[data_df["date"] <= last_available_date - timedelta(days=self.forecast_n_days_ahead)]
+
+            # Calculate the start date for the prediction dataset
+            prediction_start_date = last_available_date - timedelta(days=self.sequence_length - 1)
+
             predict_df = features_df[
-                (features_df["date"] > last_training_date)
-                & (
-                        features_df["date"]
-                        <= last_training_date + timedelta(days=self.forecast_n_days_ahead)
-                )
+                (features_df["date"] >= prediction_start_date) &
+                (features_df["date"] <= last_available_date)
                 ]
+
+            # Check if predict_df has enough data points
+            if predict_df.shape[0] < self.sequence_length:
+                raise ValueError("Insufficient data for prediction. Required sequence length not met.")
 
         except Exception as e:
             logging.error(f"Failed to split data due to {e}.")
@@ -130,8 +138,28 @@ class DatasetBuilder:
             logging.info("Data split completed.")
             return train_df, predict_df
 
+    def _log_outdated_features(self, dfs: List[pd.DataFrame]) -> None:
+        logging.info("Analyzing features...")
+        try:
+            latest_dates = {}
+            for table, df in zip(self.table_names, dfs):
+                if not df.empty:
+                    latest_dates[table] = df['date'].max()
+                else:
+                    latest_dates[table] = None
+
+            # Log the most outdated tables
+            most_outdated = sorted(latest_dates.items(), key=lambda x: x[1] or pd.Timestamp.min)
+            for table, date in most_outdated:
+                logging.info(f"Table {table} last updated on {date}")
+
+        except Exception as e:
+            logging.error(f"Failed to analyze outdated features due to {e}.")
+            raise
+
     def build_datasets(self):
         dataframes = self._get_data_from_tables()
+        self._log_outdated_features(dataframes)
         aligned_data = self._align_dates(dataframes, "date")
         labels = self._get_labels()
         train, predict = self._split_data(aligned_data, labels)
@@ -147,7 +175,8 @@ class ETFPredictor:
             epochs=1000,
             batch_size=32,
             stride=1,
-            window_length=None
+            window_length=None,
+            learning_rate=.001
     ):
         self.train_data = train_data.sort_values(by="date")
         self.predict_data = predict_data.sort_values(by="date")
@@ -156,6 +185,7 @@ class ETFPredictor:
         self.batch_size = batch_size
         self.stride = stride
         self.window_length = window_length
+        self.learning_rate = learning_rate
 
         self.scaler = StandardScaler()
         self.model = self._build_model()
@@ -170,6 +200,7 @@ class ETFPredictor:
 
     def _build_model(self):
         model = Sequential()
+
         model.add(
             LSTM(
                 units=self.train_data.shape[1],
@@ -177,16 +208,16 @@ class ETFPredictor:
                 input_shape=(self.sequence_length, self.train_data.shape[1] - 2),
             )
         )
-        model.add(LSTM(units=self.train_data.shape[1] // 2, return_sequences=False))
+        model.add(LSTM(self.train_data.shape[1] // 2, return_sequences=False))
         model.add(Dense(units=1))
-        model.compile(optimizer=Adam(learning_rate=0.001), loss="mean_squared_error")
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="mean_squared_error")
         logging.info(model.summary())
         return model
 
     def preprocess_data(self, split_ratio=0.9, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values if not self.window_length else self.train_data.drop(
             columns=["date", "close"]
-            ).values[-self.window_length:]
+        ).values[-self.window_length:]
         y = self.train_data["close"].values if not self.window_length else self.train_data["close"].values[
                                                                            -self.window_length:]
 
@@ -219,7 +250,7 @@ class ETFPredictor:
         X_train, y_train, X_val, y_val = self.preprocess_data(validate=validate)
         early_stop = EarlyStopping(
             monitor="val_loss" if validate else "loss",
-            patience=75,
+            patience=10,
             verbose=1,
             restore_best_weights=True,
         )
@@ -231,6 +262,7 @@ class ETFPredictor:
                 batch_size=self.batch_size,
                 validation_data=(X_val, y_val),
                 callbacks=[early_stop],
+
             )
         else:
             self.model.fit(
@@ -239,6 +271,7 @@ class ETFPredictor:
                 epochs=self.epochs,
                 batch_size=self.batch_size,
                 callbacks=[early_stop],
+                verbose=1
             )
 
     def predict(self):
@@ -284,9 +317,17 @@ class ETFPredictor:
         self.label_scaler = StandardScaler()  # Create a new scaler for labels
         y = self.label_scaler.fit_transform(y)
 
+        early_stop = EarlyStopping(
+            monitor="loss",
+            patience=8,
+            verbose=1,
+            restore_best_weights=True,
+        )
+
         # Fit the model
         self.model.fit(
-            X, y, epochs=self.epochs, batch_size=self.batch_size, verbose=1, use_multiprocessing=True
+            X, y, epochs=self.epochs, batch_size=self.batch_size, verbose=1, use_multiprocessing=False,
+            callbacks=[early_stop]
         )
 
     def _sequence_predict(self, X):
@@ -306,70 +347,93 @@ class ETFPredictor:
         return predicted_value[0][0]  # Return the scalar value
 
     def backtest(self, window_length=1000, overlap=500, days_ahead=7):
-        """
-        Conduct a backtest using a rolling window approach.
-
-        Parameters:
-        - window_length: Length of the training window.
-        - overlap: Number of overlapping days in the training window.
-
-        Returns:
-        - mean_absolute_error: Mean absolute error across all rolling window predictions.
-        """
         if overlap >= window_length:
             raise ValueError("Overlap should be less than window length.")
 
-        step_size = (
-                window_length - overlap
-        )  # This determines the number of new days introduced in each window.
+        step_size = window_length - overlap
         n_windows = (len(self.train_data) - window_length) // step_size
-        print(f'The step size is {step_size}, and there are {n_windows} windows we will be training over.')
+
         if n_windows <= 0:
             raise ValueError("Insufficient data for given window length and overlap.")
 
-        errors = []
+        results_df = pd.DataFrame(
+            columns=[
+                'Prediction_Date', 'Close_Price_On_Prediction_Date', 'Predicted_Close_Date',
+                'Predicted_Close_Price', 'Actual_Close_Price', 'Predicted_Price_Change', 'Actual_Price_Change'
+            ]
+        )
 
         for i in range(n_windows):
             start_idx = i * step_size
-            end_idx = start_idx + window_length
+            end_idx = start_idx + window_length - self.sequence_length
 
             train_window = self.train_data.iloc[start_idx:end_idx]
-            # the next_data is the real value n_days ahead that we are trying to predict which will be used
-            # to measure how good our model is
-            next_data = self.train_data.iloc[
-                        end_idx + days_ahead: end_idx + days_ahead + 1
-                        ]
 
-            if next_data.empty:
+            # Sequence for prediction is immediately after train_window
+            prediction_sequence = self.train_data.iloc[end_idx:end_idx + self.sequence_length]
+
+            prediction_date = prediction_sequence['date'].iloc[-1]
+
+            # Finding the closing price on the prediction date (n days before in the dataset)
+            close_price_on_prediction_date_index = self.train_data[
+                self.train_data['date'] == prediction_date - timedelta(days=days_ahead)].index
+            if close_price_on_prediction_date_index.empty:
                 continue
+            close_price_on_prediction_date = self.train_data.loc[close_price_on_prediction_date_index[0], 'close']
+
+            # Actual close price is the known closing price n days after the prediction date
+            actual_close_price = self.train_data.loc[
+                self.train_data['date'] == prediction_date, 'close'
+            ].values[0]
 
             self._rolling_train(train_window)
 
-            # Extract the feature matrix from next_data and predict the next value
-            sequence = (
-                self.train_data.iloc[end_idx - self.sequence_length: end_idx]
-                .drop(columns=["date", "close"])
-                .values
-            )
-            X_next = self.scaler.transform(sequence).reshape(
-                1, self.sequence_length, -1
-            )
-            predicted_value = self._sequence_predict(X_next)
+            # Prepare the sequence for prediction
+            sequence = prediction_sequence.drop(columns=['date', 'close']).values
+            X_next = self.scaler.transform(sequence).reshape(1, self.sequence_length, -1)
+            predicted_close_price = self._sequence_predict(X_next)
 
-            # Measure the prediction error
-            true_value = next_data["close"].values[0]
-            error = np.abs(true_value - predicted_value)
-            errors.append(error)
-            print(f"predicted_value: {predicted_value}", f"true_value: {true_value}")
-            self.model = self._build_model()  # Reset the model for the next iteration
+            predicted_price_change = predicted_close_price - close_price_on_prediction_date
+            actual_price_change = actual_close_price - close_price_on_prediction_date
 
-        print(errors)
-        mean_absolute_error = np.mean(errors)
-        return mean_absolute_error
+            new_row = pd.DataFrame(
+                {
+                    'Prediction_Date': [prediction_date],
+                    'Close_Price_On_Prediction_Date': [close_price_on_prediction_date],
+                    'Predicted_Close_Date': [prediction_date + timedelta(days=days_ahead)],
+                    'Predicted_Close_Price': [predicted_close_price],
+                    'Actual_Close_Price': [actual_close_price],
+                    'Predicted_Price_Change': [predicted_price_change],
+                    'Actual_Price_Change': [actual_price_change]
+                }
+            )
+            results_df = pd.concat([results_df, new_row], ignore_index=True)
+            print(results_df)
+            self.model = self._build_model()
+
+        mean_absolute_error = np.mean(np.abs(results_df['Actual_Close_Price'] - results_df['Predicted_Close_Price']))
+        return mean_absolute_error, results_df
+
+
 
 
 if __name__ == "__main__":
     import argparse
+    import json
+
+
+    def save_results(results, filename):
+        # Extract directory from the filename
+        directory = os.path.dirname(filename)
+
+        # Check if the directory exists, and create it if it doesn't
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # Save the file in the specified path
+        with open(filename, 'w') as file:
+            json.dump(results, file)
+
 
     # Create the parser
     parser = argparse.ArgumentParser(description="Build model for a given ETF with specified arguments")
@@ -385,6 +449,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--window_length", type=int, default=None, help="Length of the training window for backtesting."
     )
+    parser.add_argument("--learning_rate", type=float, default=.001, help="Learning rate for model training")
     parser.add_argument(
         "--overlap", type=int, default=2500, help="Number of overlapping days in the training window for backtesting."
     )
@@ -409,9 +474,21 @@ if __name__ == "__main__":
     endpoints = config["endpoints"]
 
     tables = [endpoint.lower() for endpoint in endpoints.keys()]
+    results = {
+        'etf': etf_arg,
+        'days_ahead': days_ahead,
+        'backtest': backtest,
+        'sequence_length': sequence_length,
+        'epochs': epochs,
+        'batch_size': batch_size,
+        'stride': stride,
+        'window_length': window_length,
+        'overlap': overlap,
+        'results': None
+    }
 
     self = DatasetBuilder(
-        table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead
+        table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead, sequence_length=sequence_length
     )
 
     train_data, predict_data = self.build_datasets()
@@ -425,10 +502,17 @@ if __name__ == "__main__":
             epochs=args.epochs,
             batch_size=args.batch_size,
             stride=args.stride,
+            learning_rate=args.learning_rate
         )
 
         # Backtest the predictor with overlapping windows:
-        mae = self.backtest(window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead)
+        mae, results_df = self.backtest(
+            window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead
+        )
+        print(results_df)
+        results['results'] = {'mae': mae}
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_results(results, f"./grid_search_results/{etf_arg}/{timestamp}.json")
 
         print(f"Mean Absolute Error during backtesting: {mae}")
 
@@ -440,9 +524,10 @@ if __name__ == "__main__":
             epochs=args.epochs,
             batch_size=args.batch_size,
             stride=args.stride,
-            window_length=window_length
+            window_length=window_length,
+            learning_rate=args.learning_rate
+
         )
         predictor.train(validate=args.validate)
         predictions = predictor.predict()
-
         print(predictions)

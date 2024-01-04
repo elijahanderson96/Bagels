@@ -1,0 +1,1 @@
+{"etf": "AGG", "days_ahead": 28, "backtest": true, "sequence_length": 28, "epochs": 5, "batch_size": 32, "stride": 1, "window_length": 1000, "overlap": 100, "results": {"mae": 0.7097454071044922}}
