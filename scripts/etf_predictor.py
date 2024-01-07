@@ -1,6 +1,5 @@
 import logging
 import os
-from datetime import datetime
 from datetime import timedelta
 from functools import reduce
 from typing import List
@@ -352,7 +351,10 @@ class ETFPredictor:
 
         step_size = window_length - overlap
         n_windows = (len(self.train_data) - window_length) // step_size
-
+        print(
+            f"The window length is {window_length}, overlap is {overlap}. This means we have a step size of "
+            f"{step_size} and there are {n_windows} windows we will be iterating over."
+        )
         if n_windows <= 0:
             raise ValueError("Insufficient data for given window length and overlap.")
 
@@ -364,6 +366,7 @@ class ETFPredictor:
         )
 
         for i in range(n_windows):
+            print(f"We are currently on window {i + 1} of {n_windows + 1} training windows")
             start_idx = i * step_size
             end_idx = start_idx + window_length - self.sequence_length
 
@@ -411,9 +414,54 @@ class ETFPredictor:
             print(results_df)
             self.model = self._build_model()
 
-        mean_absolute_error = np.mean(np.abs(results_df['Actual_Close_Price'] - results_df['Predicted_Close_Price']))
-        return mean_absolute_error, results_df
+        db_connector.insert_dataframe(results_df, name='results', schema=etf_arg.lower(), if_exists='replace')
+        backtest_results_df, pmae, underpredict_percentage, overpredict_percentage = \
+            self.analyze_backtest_results_with_skew_and_pmae(
+                results_df
+            )
+        return backtest_results_df, pmae, underpredict_percentage, overpredict_percentage
 
+    @staticmethod
+    def analyze_backtest_results_with_skew_and_pmae(backtest_results_df):
+        # Calculate the differences and percentage errors
+        differences = backtest_results_df['Predicted_Close_Price'] - backtest_results_df['Actual_Close_Price']
+        percentage_errors = differences / backtest_results_df['Actual_Close_Price']
+
+        # Calculate PMAE
+        pmae = np.mean(np.abs(percentage_errors)) * 100  # PMAE in percentage
+
+        # Assess the skew
+        underpredictions = np.sum(differences < 0)
+        overpredictions = np.sum(differences > 0)
+        total_predictions = len(differences)
+        underpredict_percentage = underpredictions / total_predictions * 100
+        overpredict_percentage = overpredictions / total_predictions * 100
+
+        skew = underpredict_percentage - overpredict_percentage
+
+        # Adjusted prediction range function considering skew
+        def adjusted_prediction_range_percentage(predicted_price, pmae, skew):
+            adjustment_factor = (skew / 100) * (pmae / 100) * predicted_price
+            return predicted_price - (pmae / 100 * predicted_price) - adjustment_factor, \
+                   predicted_price + (pmae / 100 * predicted_price) + adjustment_factor
+
+        # Apply the adjusted prediction range function
+        backtest_results_df['Prediction_Range_Lower'] = backtest_results_df['Predicted_Close_Price'].apply(
+            lambda x: adjusted_prediction_range_percentage(x, pmae, skew)[0]
+        )
+        backtest_results_df['Prediction_Range_Upper'] = backtest_results_df['Predicted_Close_Price'].apply(
+            lambda x: adjusted_prediction_range_percentage(x, pmae, skew)[1]
+        )
+
+        return backtest_results_df, pmae, underpredict_percentage, overpredict_percentage
+
+    @staticmethod
+    def adjusted_prediction_range(predicted_price, mae):
+        mae_adjustment = mae / 100 * predicted_price
+        lower_bound = predicted_price - mae_adjustment
+        upper_bound = predicted_price + mae_adjustment
+
+        return lower_bound, upper_bound
 
 
 
@@ -441,7 +489,7 @@ if __name__ == "__main__":
     # Add arguments
     parser.add_argument("--etf", type=str, help="The ETF we are sourcing data for.")
     parser.add_argument("--days_ahead", type=int, default=182, help="How many days ahead are we forecasting?")
-    parser.add_argument("--backtest", action="store_true", help="Are we back testing a model?")
+    parser.add_argument("--train", action="store_true", help="Are we training a model for current predictions?")
     parser.add_argument("--sequence_length", type=int, default=28, help="Input sequence length for the model.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training the model.")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for model training.")
@@ -461,7 +509,7 @@ if __name__ == "__main__":
     # Extracting arguments
     etf_arg = args.etf
     days_ahead = args.days_ahead
-    backtest = args.backtest
+    train = args.train
     sequence_length = args.sequence_length
     epochs = args.epochs
     batch_size = args.batch_size
@@ -477,7 +525,6 @@ if __name__ == "__main__":
     results = {
         'etf': etf_arg,
         'days_ahead': days_ahead,
-        'backtest': backtest,
         'sequence_length': sequence_length,
         'epochs': epochs,
         'batch_size': batch_size,
@@ -494,29 +541,33 @@ if __name__ == "__main__":
     train_data, predict_data = self.build_datasets()
     train_data.drop(columns="date_label", inplace=True)
 
-    if args.backtest:
-        self = ETFPredictor(
-            train_data=train_data,
-            predict_data=predict_data,
-            sequence_length=args.sequence_length,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            stride=args.stride,
-            learning_rate=args.learning_rate
-        )
+    # Backtest is performed by default
+    backtest_predictor = ETFPredictor(
+        train_data=train_data,
+        predict_data=predict_data,
+        sequence_length=args.sequence_length,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        stride=args.stride,
+        learning_rate=args.learning_rate
+    )
 
-        # Backtest the predictor with overlapping windows:
-        mae, results_df = self.backtest(
-            window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead
-        )
-        print(results_df)
-        results['results'] = {'mae': mae}
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_results(results, f"./grid_search_results/{etf_arg}/{timestamp}.json")
+    # Perform the backtest
+    analyzed_results, calculated_pmae, underpredict_percent, overpredict_percent = backtest_predictor.backtest(
+        window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead
+    )
+    print(analyzed_results)
+    print(f"The mean absolute error percentage is: {calculated_pmae}%")
+    print(f"The model underpredicted the actual price {underpredict_percent}% of the time.")
+    print(f"The model overpredicted the actual price {overpredict_percent}% of the time.")
 
-        print(f"Mean Absolute Error during backtesting: {mae}")
+    # Save backtest results
+    # results = {'results': {'mae': calculated_pmae}}
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # save_results(results, f"./grid_search_results/{etf_arg}/{timestamp}.json")
 
-    else:
+    if args.train:
+        # Train a new model if --train flag is passed
         predictor = ETFPredictor(
             train_data=train_data,
             predict_data=predict_data,
@@ -524,10 +575,17 @@ if __name__ == "__main__":
             epochs=args.epochs,
             batch_size=args.batch_size,
             stride=args.stride,
-            window_length=window_length,
+            window_length=args.window_length,
             learning_rate=args.learning_rate
-
         )
+
         predictor.train(validate=args.validate)
-        predictions = predictor.predict()
-        print(predictions)
+        prediction_df = predictor.predict()
+
+        # Assuming prediction_df contains a single entry with a date and price
+        predicted_price = prediction_df['Predicted_Close'].iloc[0]
+        prediction_range = predictor.adjusted_prediction_range(
+            predicted_price, calculated_pmae
+        )
+        print(f"Prediction Range: {prediction_range[0]} to {prediction_range[1]}")
+        print(f"Predicted Date: {prediction_df['Date'].iloc[0]} \nPredicted Price: {predicted_price}")

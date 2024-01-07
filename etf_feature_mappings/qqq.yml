@@ -1,4 +1,5 @@
 endpoints:
+  #FEDFUNDS: "Effective Federal Funds Rate"
   DGS1: "1-Year Constant Maturity"
   DGS2:  "2-Year Constant Maturity"
   DGS5:  "5-Year Constant Maturity"
@@ -11,12 +12,14 @@ endpoints:
   UNRATE: "Unemployment Rate"
   CPIAUCNS: "Consumer Price Index for All Urban Consumers"
   INDPRO: "Industrial Production Index"
-  CSUSHPINSA: "S&P/Case-Shiller U.S. National Home Price Index"
+  #CSUSHPINSA: "S&P/Case-Shiller U.S. National Home Price Index"
   UMCSENT: "University of Michigan: Consumer Sentiment"
   RSAFS: "Retail Sales: Total"
   DCOILWTICO: "Crude Oil Prices: West Texas Intermediate"
-  TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
-  DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
+  #TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
+  #TERMCBCCALLNS: "Commercial Bank Interest Rate on Credit Card Plans, All Accounts"
+  #DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
+  VIXCLS:  "Volatility Index VIX"
 etf:
-  - "VTV"
+  - "QQQ"
 
