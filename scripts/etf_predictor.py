@@ -23,19 +23,21 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class DatasetBuilder:
     def __init__(
-            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14, sequence_length: int = 14
+            self, table_names: List[str], etf_symbol: str, forecast_n_days_ahead: int = 14, sequence_length: int = 14,
+            from_date=None
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
         self.forecast_n_days_ahead = forecast_n_days_ahead
         self.sequence_length = sequence_length
+        self.from_date = from_date
 
     def _get_data_from_tables(self) -> List[pd.DataFrame]:
         logging.info("Fetching data from tables...")
         try:
             dfs = [
                 db_connector.run_query(
-                    f"SELECT * FROM {self.etf_symbol.lower()}.{table}"
+                    f"SELECT * FROM {self.etf_symbol.lower()}.{table} WHERE date > '{self.from_date}'"
                 )
                 for table in self.table_names
             ]
@@ -213,10 +215,12 @@ class ETFPredictor:
         logging.info(model.summary())
         return model
 
+
     def preprocess_data(self, split_ratio=0.9, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values if not self.window_length else self.train_data.drop(
             columns=["date", "close"]
         ).values[-self.window_length:]
+        logging.info(f"New train data is of shape {len(X)}")
         y = self.train_data["close"].values if not self.window_length else self.train_data["close"].values[
                                                                            -self.window_length:]
 
@@ -249,7 +253,7 @@ class ETFPredictor:
         X_train, y_train, X_val, y_val = self.preprocess_data(validate=validate)
         early_stop = EarlyStopping(
             monitor="val_loss" if validate else "loss",
-            patience=10,
+            patience=20,
             verbose=1,
             restore_best_weights=True,
         )
@@ -288,9 +292,10 @@ class ETFPredictor:
         predicted_close = self.label_scaler.inverse_transform([[predicted_close]])[0][0]
 
         # Handling the date for the prediction
+        prediction_date = self.predict_data['date'].iloc[-1]
         dates_predict = self.predict_data["offset_date"].iloc[-1]
         future_date = dates_predict + timedelta(days=1)
-        prediction_df = pd.DataFrame({"Date": [future_date], "Predicted_Close": [predicted_close]})
+        prediction_df = pd.DataFrame({"Date": [future_date], "Predicted_Close": [predicted_close], "Prediction_Made_On_Date": prediction_date})
 
         return prediction_df
 
@@ -360,8 +365,8 @@ class ETFPredictor:
 
         results_df = pd.DataFrame(
             columns=[
-                'Prediction_Date', 'Close_Price_On_Prediction_Date', 'Predicted_Close_Date',
-                'Predicted_Close_Price', 'Actual_Close_Price', 'Predicted_Price_Change', 'Actual_Price_Change'
+                'prediction_date', 'close_price_on_prediction_date', 'predicted_close_date',
+                'predicted_close_price', 'actual_close_price', 'predicted_price_change', 'actual_price_change'
             ]
         )
 
@@ -401,13 +406,13 @@ class ETFPredictor:
 
             new_row = pd.DataFrame(
                 {
-                    'Prediction_Date': [prediction_date],
-                    'Close_Price_On_Prediction_Date': [close_price_on_prediction_date],
-                    'Predicted_Close_Date': [prediction_date + timedelta(days=days_ahead)],
-                    'Predicted_Close_Price': [predicted_close_price],
-                    'Actual_Close_Price': [actual_close_price],
-                    'Predicted_Price_Change': [predicted_price_change],
-                    'Actual_Price_Change': [actual_price_change]
+                    'prediction_date': [prediction_date],
+                    'close_price_on_prediction_date': [close_price_on_prediction_date],
+                    'predicted_close_date': [prediction_date + timedelta(days=days_ahead)],
+                    'predicted_close_price': [predicted_close_price],
+                    'actual_close_price': [actual_close_price],
+                    'predicted_price_change': [predicted_price_change],
+                    'actual_price_change': [actual_price_change]
                 }
             )
             results_df = pd.concat([results_df, new_row], ignore_index=True)
@@ -415,45 +420,21 @@ class ETFPredictor:
             self.model = self._build_model()
 
         db_connector.insert_dataframe(results_df, name='results', schema=etf_arg.lower(), if_exists='replace')
-        backtest_results_df, pmae, underpredict_percentage, overpredict_percentage = \
-            self.analyze_backtest_results_with_skew_and_pmae(
+        backtest_results_df, pmae = self.calculate_percent_mean_absolute_error(
                 results_df
             )
-        return backtest_results_df, pmae, underpredict_percentage, overpredict_percentage
+        return backtest_results_df, pmae
 
     @staticmethod
-    def analyze_backtest_results_with_skew_and_pmae(backtest_results_df):
+    def calculate_percent_mean_absolute_error(backtest_results_df):
         # Calculate the differences and percentage errors
-        differences = backtest_results_df['Predicted_Close_Price'] - backtest_results_df['Actual_Close_Price']
-        percentage_errors = differences / backtest_results_df['Actual_Close_Price']
+        differences = backtest_results_df['predicted_close_price'] - backtest_results_df['actual_close_price']
+        percentage_errors = differences / backtest_results_df['actual_close_price']
 
         # Calculate PMAE
         pmae = np.mean(np.abs(percentage_errors)) * 100  # PMAE in percentage
 
-        # Assess the skew
-        underpredictions = np.sum(differences < 0)
-        overpredictions = np.sum(differences > 0)
-        total_predictions = len(differences)
-        underpredict_percentage = underpredictions / total_predictions * 100
-        overpredict_percentage = overpredictions / total_predictions * 100
-
-        skew = underpredict_percentage - overpredict_percentage
-
-        # Adjusted prediction range function considering skew
-        def adjusted_prediction_range_percentage(predicted_price, pmae, skew):
-            adjustment_factor = (skew / 100) * (pmae / 100) * predicted_price
-            return predicted_price - (pmae / 100 * predicted_price) - adjustment_factor, \
-                   predicted_price + (pmae / 100 * predicted_price) + adjustment_factor
-
-        # Apply the adjusted prediction range function
-        backtest_results_df['Prediction_Range_Lower'] = backtest_results_df['Predicted_Close_Price'].apply(
-            lambda x: adjusted_prediction_range_percentage(x, pmae, skew)[0]
-        )
-        backtest_results_df['Prediction_Range_Upper'] = backtest_results_df['Predicted_Close_Price'].apply(
-            lambda x: adjusted_prediction_range_percentage(x, pmae, skew)[1]
-        )
-
-        return backtest_results_df, pmae, underpredict_percentage, overpredict_percentage
+        return backtest_results_df, pmae
 
     @staticmethod
     def adjusted_prediction_range(predicted_price, mae):
@@ -463,26 +444,91 @@ class ETFPredictor:
 
         return lower_bound, upper_bound
 
+    def bootstrap_prediction_range(self, backtest_results_df, predicted_price, num_samples=1000, confidence_level=0.99):
+        """
+        Calculate the prediction range for a given predicted price using the bootstrapping method.
+
+        Args:
+            backtest_results_df (pd.DataFrame): DataFrame containing the backtest results.
+                                                It must have 'actual_close_price' and 'predicted_close_price' columns.
+            predicted_price (float): The price prediction for which the range is to be calculated.
+            num_samples (int): The number of bootstrap samples to draw. Default is 1000.
+            confidence_level (float): The confidence level for the prediction range. Default is 0.90.
+
+        Returns:
+            tuple: A tuple containing the lower and upper bounds of the bootstrapped prediction range.
+
+        Raises:
+            ValueError: If the input DataFrame is empty or not properly formatted.
+        """
+
+        # Logging the start of the function execution
+        logging.info("Starting bootstrap prediction range calculation.")
+
+        # Validate inputs
+        if backtest_results_df.empty:
+            raise ValueError("Backtest results DataFrame is empty.")
+        if not {'actual_close_price', 'predicted_close_price'}.issubset(backtest_results_df.columns):
+            raise ValueError("DataFrame must contain 'actual_close_price' and 'predicted_close_price' columns.")
+
+        errors = backtest_results_df['actual_close_price'] - backtest_results_df['predicted_close_price']
+        bootstrapped_means = []
+
+        # Bootstrapping process
+        for i in range(num_samples):
+            sample = np.random.choice(errors, size=len(errors), replace=True)
+            bootstrapped_means.append(np.mean(sample))
+            if i % 100 == 0:
+                logging.info(f"Processing bootstrap sample {i + 1}/{num_samples}")
+
+        # Calculating the percentiles for the prediction range
+        lower_percentile = (1 - confidence_level) / 2 * 100
+        upper_percentile = (1 - lower_percentile / 100) * 100
+        lower_bound = predicted_price + np.percentile(bootstrapped_means, lower_percentile)
+        upper_bound = predicted_price + np.percentile(bootstrapped_means, upper_percentile)
+
+        # Logging the result
+        logging.info(f"Calculated prediction range: Lower bound = {lower_bound}, Upper bound = {upper_bound}")
+
+        return lower_bound, upper_bound
+
+    def evaluate_directional_accuracy(self, backtest_results_df: pd.DataFrame) -> float:
+        """
+        Evaluate the accuracy of the model in predicting the direction of price changes.
+
+        Args:
+            backtest_results_df (pd.DataFrame): DataFrame containing the backtest results.
+                                                It must have 'predicted_price_change' and 'actual_price_change' columns.
+
+        Returns:
+            float: The accuracy of the model in predicting the direction of the price change.
+
+        Raises:
+            ValueError: If the input DataFrame is empty or not properly formatted.
+        """
+
+        # Validate inputs
+        if backtest_results_df.empty:
+            raise ValueError("Backtest results DataFrame is empty.")
+        if not {'predicted_price_change', 'actual_price_change'}.issubset(backtest_results_df.columns):
+            raise ValueError("DataFrame must contain 'predicted_price_change' and 'actual_price_change' columns.")
+
+        # Determine if the prediction direction matches the actual direction
+        correct_predictions = (
+                    backtest_results_df['predicted_price_change'] * backtest_results_df['actual_price_change'] > 0)
+
+        # Calculate the accuracy
+        accuracy = correct_predictions.mean() * 100
+
+        logging.info(f"The accuracy of the model historically when classifying price increase or decrease is {accuracy} %")
+
+        return accuracy
+
+
 
 
 if __name__ == "__main__":
     import argparse
-    import json
-
-
-    def save_results(results, filename):
-        # Extract directory from the filename
-        directory = os.path.dirname(filename)
-
-        # Check if the directory exists, and create it if it doesn't
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        # Save the file in the specified path
-        with open(filename, 'w') as file:
-            json.dump(results, file)
-
-
     # Create the parser
     parser = argparse.ArgumentParser(description="Build model for a given ETF with specified arguments")
 
@@ -501,6 +547,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--overlap", type=int, default=2500, help="Number of overlapping days in the training window for backtesting."
     )
+    parser.add_argument("--from_date", type=str, default='2000-01-01')
     parser.add_argument("--validate", action="store_true", help="Enable validation during training.")
 
     # Parse the arguments
@@ -533,9 +580,10 @@ if __name__ == "__main__":
         'overlap': overlap,
         'results': None
     }
-
+    print(args.from_date)
     self = DatasetBuilder(
-        table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead, sequence_length=sequence_length
+        table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead, sequence_length=sequence_length,
+        from_date=args.from_date
     )
 
     train_data, predict_data = self.build_datasets()
@@ -553,18 +601,11 @@ if __name__ == "__main__":
     )
 
     # Perform the backtest
-    analyzed_results, calculated_pmae, underpredict_percent, overpredict_percent = backtest_predictor.backtest(
+    analyzed_results, calculated_pmae = backtest_predictor.backtest(
         window_length=args.window_length, overlap=args.overlap, days_ahead=args.days_ahead
     )
     print(analyzed_results)
     print(f"The mean absolute error percentage is: {calculated_pmae}%")
-    print(f"The model underpredicted the actual price {underpredict_percent}% of the time.")
-    print(f"The model overpredicted the actual price {overpredict_percent}% of the time.")
-
-    # Save backtest results
-    # results = {'results': {'mae': calculated_pmae}}
-    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # save_results(results, f"./grid_search_results/{etf_arg}/{timestamp}.json")
 
     if args.train:
         # Train a new model if --train flag is passed
@@ -582,10 +623,15 @@ if __name__ == "__main__":
         predictor.train(validate=args.validate)
         prediction_df = predictor.predict()
 
+        print(prediction_df)
         # Assuming prediction_df contains a single entry with a date and price
         predicted_price = prediction_df['Predicted_Close'].iloc[0]
         prediction_range = predictor.adjusted_prediction_range(
             predicted_price, calculated_pmae
         )
-        print(f"Prediction Range: {prediction_range[0]} to {prediction_range[1]}")
+        print(f"Prediction Range Based on MAE alone: {prediction_range[0]} to {prediction_range[1]}")
         print(f"Predicted Date: {prediction_df['Date'].iloc[0]} \nPredicted Price: {predicted_price}")
+        print(analyzed_results)
+
+        predictor.bootstrap_prediction_range(analyzed_results, predicted_price)
+        predictor.evaluate_directional_accuracy(analyzed_results)

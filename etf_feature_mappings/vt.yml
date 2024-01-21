@@ -17,6 +17,9 @@ endpoints:
   DCOILWTICO: "Crude Oil Prices: West Texas Intermediate"
   TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
   DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
+  MABMM301USM189S: "Monetary Aggregates and Their Components: Broad Money and Components: M3 for United States"
+  MABMM301EZM189S: "Monetary Aggregates and Their Components: Broad Money and Components: M3 for Euro Area (19 Countries)"
+  USALOLITONOSTSAM: "Leading Indicators: Composite Leading Indicator: Normalised for United States"
 etf:
-  - "VTV"
+  - "VT"
 

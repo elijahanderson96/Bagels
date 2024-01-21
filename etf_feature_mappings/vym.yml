@@ -11,15 +11,13 @@ endpoints:
   UNRATE: "Unemployment Rate"
   CPIAUCNS: "Consumer Price Index for All Urban Consumers"
   INDPRO: "Industrial Production Index"
-  #CSUSHPINSA: "S&P/Case-Shiller U.S. National Home Price Index"
+  CSUSHPINSA: "S&P/Case-Shiller U.S. National Home Price Index"
   UMCSENT: "University of Michigan: Consumer Sentiment"
   RSAFS: "Retail Sales: Total"
   DCOILWTICO: "Crude Oil Prices: West Texas Intermediate"
   TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
-  #DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
-  MABMM301USM189S: "Monetary Aggregates and Their Components: Broad Money and Components: M3 for United States"
-  MABMM301EZM189S: "Monetary Aggregates and Their Components: Broad Money and Components: M3 for Euro Area (19 Countries)"
-  USALOLITONOSTSAM: "Leading Indicators: Composite Leading Indicator: Normalised for United States"
+  DRTSCILM: "Net Percentage of Domestic Banks Tightening Standards for Commercial and Industrial Loans to Large and Middle-Market Firms"
 etf:
-  - "SPY"
+  - "VYM
+  "
 

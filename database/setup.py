@@ -8,59 +8,90 @@ connector = PostgreSQLConnector(
     password="password",
 )
 
+
 connector.create_database("bagels")
 
 connector.dbname = "bagels"
 
-schemas = ("models", "data", "users")
+schemas = ("spy", "schd", "qqq", "vym", "vtv")
 
 [connector.create_schema(schema) for schema in schemas]
 
 models_columns = {
     "id": "SERIAL PRIMARY KEY",
     "symbol": "TEXT",
-    "trained_from": "DATE",
-    "trained_to": "DATE",
-    "n_training_points": "INTEGER",
-    "model_summary": "TEXT",
-    "date_trained": "DATE",
-    "features": "TEXT",
-    "loss": "REAL",
-    "days_forecast": "INTEGER",
+    "trained_on_date": "DATE",
+    "features": "JSONB",
+    "architecture": "JSONB",
+    "training_loss_info": "JSONB",
+    "hyperparameters": "JSONB"
+
 }
 
-connector.create_table("models", models_columns, schema="models")
+[connector.create_table("models", models_columns, schema=schema) for schema in schemas]
 
-connector.add_unique_key(
+[connector.add_unique_key(
     "models",
     [
-        "date_trained",
-        "features",
         "symbol",
-        "days_forecast",
-        "model_summary",
-        "n_training_points",
+        "trained_on_date",
+        "features",
+        "architecture",
+        "hyperparameters",
     ],
     "models_unique_key",
-    schema="models",
-)
+    schema=schema, ) for schema in schemas]
 
 model_predictions_columns = {
     "id": "SERIAL PRIMARY KEY",
     "model_id": "INTEGER",
     "date": "DATE",
-    "prediction": "REAL",
-    "actual": "REAL",
+    "predicted_price": "REAL",
+    "bootstrap_price_range": "TEXT",
+    "mean_percentage_absolute_error": "REAL",
+    "mpae_price_range": "REAL"
 }
 
-connector.create_table("model_predictions", model_predictions_columns, schema="models")
+[connector.create_table("forecasts", model_predictions_columns, schema=schema) for schema in schemas]
 
-connector.add_unique_key(
-    "model_predictions",
+[connector.add_unique_key(
+    "forecasts",
     ["model_id", "date"],
     "model_predictions_unique_key",
-    schema="models",
-)
-connector.add_foreign_key(
-    "model_predictions", "model_id", "models", "id", schema="models"
-)
+    schema=schema,
+) for schema in schemas]
+
+[connector.add_foreign_key(
+    "forecasts", "model_id", "models", "id", schema=schema
+) for schema in schemas]
+
+
+training_data_columns = {
+    "id": "SERIAL PRIMARY KEY",
+    "model_id": "INTEGER",
+    "data_blob": "BYTEA"
+}
+
+[connector.create_table("training_data", training_data_columns, schema=schema) for schema in schemas]
+[connector.create_table("prediction_data", training_data_columns, schema=schema) for schema in schemas]
+
+[connector.add_foreign_key(
+    "training_data", "model_id", "models", "id", schema=schema
+) for schema in schemas]
+
+[connector.add_foreign_key(
+    "prediction_data", "model_id", "models", "id", schema=schema
+) for schema in schemas]
+
+backtest_results_cols = {
+    "id": "SERIAL PRIMARY KEY",
+    "model_id": "INTEGER",
+    "data_blob" : "BYTEA"
+
+}
+
+[connector.create_table("backtest_results", backtest_results_cols, schema=schema) for schema in schemas]
+
+[connector.add_foreign_key(
+    "backtest_results", "model_id", "models", "id", schema=schema
+) for schema in schemas]
