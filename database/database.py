@@ -86,6 +86,32 @@ class PostgreSQLConnector:
         except Exception as e:
             self.logger.error(f"Error connecting to the database: {e}")
 
+    def insert_row(self, table, data, schema=None):
+        """
+        Insert a row into a table.
+
+        Parameters:
+        table (str): The name of the table.
+        data (dict): A dictionary of column-value pairs to insert.
+        schema (str, optional): The schema name. Defaults to None.
+        """
+        columns = ', '.join(data.keys())
+        placeholders = ', '.join(['%s'] for _ in data)
+        query = sql.SQL("INSERT INTO {schema}.{table} ({columns}) VALUES ({placeholders})").format(
+            schema=sql.Identifier(schema) if schema else sql.SQL('public'),
+            table=sql.Identifier(table),
+            columns=sql.SQL(columns),
+            placeholders=sql.SQL(placeholders)
+        )
+        try:
+            conn = self.connect()
+            with conn.cursor() as cursor:
+                cursor.execute(query, list(data.values()))
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error inserting row into {table}: {e}")
+            raise
+
     def run_query(
         self,
         query: Union[str, Composed],
@@ -139,7 +165,7 @@ class PostgreSQLConnector:
             dbname (str): The name of the database to create.
         """
         # Establish a new connection to the PostgreSQL server
-        conn = psycopg2.connect(user=self.user, host=self.host, password=self.password)
+        conn = psycopg2.connect(dbname="postgres", user=self.user, host=self.host, password=self.password)
         conn.autocommit = True  # Enable autocommit mode for this transaction
 
         with conn.cursor() as cur:

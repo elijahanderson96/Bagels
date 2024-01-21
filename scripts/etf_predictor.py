@@ -215,7 +215,6 @@ class ETFPredictor:
         logging.info(model.summary())
         return model
 
-
     def preprocess_data(self, split_ratio=0.9, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values if not self.window_length else self.train_data.drop(
             columns=["date", "close"]
@@ -295,7 +294,8 @@ class ETFPredictor:
         prediction_date = self.predict_data['date'].iloc[-1]
         dates_predict = self.predict_data["offset_date"].iloc[-1]
         future_date = dates_predict + timedelta(days=1)
-        prediction_df = pd.DataFrame({"Date": [future_date], "Predicted_Close": [predicted_close], "Prediction_Made_On_Date": prediction_date})
+        prediction_df = pd.DataFrame(
+            {"Date": [future_date], "Predicted_Close": [predicted_close], "Prediction_Made_On_Date": prediction_date})
 
         return prediction_df
 
@@ -421,8 +421,8 @@ class ETFPredictor:
 
         db_connector.insert_dataframe(results_df, name='results', schema=etf_arg.lower(), if_exists='replace')
         backtest_results_df, pmae = self.calculate_percent_mean_absolute_error(
-                results_df
-            )
+            results_df
+        )
         return backtest_results_df, pmae
 
     @staticmethod
@@ -515,20 +515,20 @@ class ETFPredictor:
 
         # Determine if the prediction direction matches the actual direction
         correct_predictions = (
-                    backtest_results_df['predicted_price_change'] * backtest_results_df['actual_price_change'] > 0)
+                backtest_results_df['predicted_price_change'] * backtest_results_df['actual_price_change'] > 0)
 
         # Calculate the accuracy
         accuracy = correct_predictions.mean() * 100
 
-        logging.info(f"The accuracy of the model historically when classifying price increase or decrease is {accuracy} %")
+        logging.info(
+            f"The accuracy of the model historically when classifying price increase or decrease is {accuracy} %")
 
         return accuracy
 
 
-
-
 if __name__ == "__main__":
     import argparse
+
     # Create the parser
     parser = argparse.ArgumentParser(description="Build model for a given ETF with specified arguments")
 
@@ -580,7 +580,7 @@ if __name__ == "__main__":
         'overlap': overlap,
         'results': None
     }
-    print(args.from_date)
+
     self = DatasetBuilder(
         table_names=tables, etf_symbol=etf_arg, forecast_n_days_ahead=days_ahead, sequence_length=sequence_length,
         from_date=args.from_date

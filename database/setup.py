@@ -4,10 +4,9 @@ from database import PostgreSQLConnector
 connector = PostgreSQLConnector(
     host="localhost",
     port="5432",
-    user="postgres",
+    user="elijahanderson",
     password="password",
 )
-
 
 connector.create_database("bagels")
 
@@ -65,7 +64,6 @@ model_predictions_columns = {
     "forecasts", "model_id", "models", "id", schema=schema
 ) for schema in schemas]
 
-
 training_data_columns = {
     "id": "SERIAL PRIMARY KEY",
     "model_id": "INTEGER",
@@ -86,7 +84,9 @@ training_data_columns = {
 backtest_results_cols = {
     "id": "SERIAL PRIMARY KEY",
     "model_id": "INTEGER",
-    "data_blob" : "BYTEA"
+    "mean_absolute_error": "REAL",
+    "mean_absolute_percentage_error": "REAL",
+    "data_blob": "BYTEA"
 
 }
 
