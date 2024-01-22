@@ -46,10 +46,10 @@ def main():
     params = {
         "Days_Ahead": [112, 140, 210],
         "Sequence_Length": [14, 21, 28],
-        "Window_Length": [150, 200, 250, 500, 1000],
+        "Window_Length": [150, 200, 250, 500],
         "Batch_Size": [32],
-        "Epochs": [5000],
-        "Learning Rate": [.000025]
+        "Epochs": [250],
+        "Learning Rate": [.00005]
     }
 
     # Using ProcessPoolExecutor to manage concurrent processes
