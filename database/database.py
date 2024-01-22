@@ -95,13 +95,15 @@ class PostgreSQLConnector:
         data (dict): A dictionary of column-value pairs to insert.
         schema (str, optional): The schema name. Defaults to None.
         """
-        columns = ', '.join(data.keys())
-        placeholders = ', '.join(['%s' for _ in data])
-        query = sql.SQL("INSERT INTO {schema}.{table} ({columns}) VALUES ({placeholders})").format(
-            schema=sql.Identifier(schema) if schema else sql.SQL('public'),
+        columns = ", ".join(data.keys())
+        placeholders = ", ".join(["%s" for _ in data])
+        query = sql.SQL(
+            "INSERT INTO {schema}.{table} ({columns}) VALUES ({placeholders})"
+        ).format(
+            schema=sql.Identifier(schema) if schema else sql.SQL("public"),
             table=sql.Identifier(table),
             columns=sql.SQL(columns),
-            placeholders=sql.SQL(placeholders)
+            placeholders=sql.SQL(placeholders),
         )
         try:
             conn = self.connect()
@@ -165,7 +167,9 @@ class PostgreSQLConnector:
             dbname (str): The name of the database to create.
         """
         # Establish a new connection to the PostgreSQL server
-        conn = psycopg2.connect(dbname="postgres", user=self.user, host=self.host, password=self.password)
+        conn = psycopg2.connect(
+            dbname="postgres", user=self.user, host=self.host, password=self.password
+        )
         conn.autocommit = True  # Enable autocommit mode for this transaction
 
         with conn.cursor() as cur:
