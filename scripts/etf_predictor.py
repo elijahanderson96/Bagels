@@ -487,8 +487,8 @@ class ETFPredictor:
 
         early_stop = EarlyStopping(
             monitor="loss",
-            patience=8,
-            verbose=1,
+            patience=10,
+            verbose=0,
             restore_best_weights=True,
         )
 
@@ -498,7 +498,7 @@ class ETFPredictor:
             y,
             epochs=self.epochs,
             batch_size=self.batch_size,
-            verbose=1,
+            verbose=0,
             use_multiprocessing=False,
             callbacks=[early_stop],
         )
@@ -955,7 +955,7 @@ if __name__ == "__main__":
             model_id=model_id,
             mape=calculated_pmae,
             cap=classification_accuracy,
-            training_windows=predictor.n_windows,
+            training_windows=backtest_predictor.n_windows,
             bootstrap_range=f"{lower_bound}-{upper_bound}",
             mpae_range=f"{prediction_range[0]}-{prediction_range[1]}",
             results_df=analyzed_results,

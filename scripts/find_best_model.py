@@ -24,8 +24,12 @@ def spawn_training_process(params, etf):
         "--window_length",
         str(params["Window_Length"]),
         "--overlap",
-        str(params["Window_Length"] - 250),  # No overlap
-        "--backtest",  # Backtest flag
+        str(params["Window_Length"] - 7),  # No overlap
+        "--train",
+        "--from_date",
+        "2021-01-01",
+        "--learning_rate",
+        ".00005"
     ]
     subprocess.run(command)  # Using run for synchronous execution
 
@@ -40,11 +44,12 @@ def main():
 
     # Define the range of parameters for grid search
     params = {
-        "Days_Ahead": [112, 140, 210, 280],
-        "Sequence_Length": [28, 56, 112, 224],
-        "Window_Length": [1000, 1500, 2000],
-        "Batch_Size": [32, 64],
+        "Days_Ahead": [112, 140, 210],
+        "Sequence_Length": [14, 21, 28],
+        "Window_Length": [150, 200, 250, 500, 1000],
+        "Batch_Size": [32],
         "Epochs": [5000],
+        "Learning Rate": [.000025]
     }
 
     # Using ProcessPoolExecutor to manage concurrent processes
