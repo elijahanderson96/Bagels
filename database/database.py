@@ -96,7 +96,7 @@ class PostgreSQLConnector:
         schema (str, optional): The schema name. Defaults to None.
         """
         columns = ', '.join(data.keys())
-        placeholders = ', '.join(['%s'] for _ in data)
+        placeholders = ', '.join(['%s' for _ in data])
         query = sql.SQL("INSERT INTO {schema}.{table} ({columns}) VALUES ({placeholders})").format(
             schema=sql.Identifier(schema) if schema else sql.SQL('public'),
             table=sql.Identifier(table),

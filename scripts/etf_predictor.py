@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from datetime import timedelta
@@ -187,6 +188,7 @@ class ETFPredictor:
         self.stride = stride
         self.window_length = window_length
         self.learning_rate = learning_rate
+        self.features = [col for col in train_data.columns.to_list() if col not in ('date', 'close')]
 
         self.scaler = StandardScaler()
         self.model = self._build_model()
@@ -214,6 +216,32 @@ class ETFPredictor:
         model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="mean_squared_error")
         logging.info(model.summary())
         return model
+
+    def save_model_details(self, connector, schema):
+        """
+        Save model details to the 'models' table.
+
+        Args:
+            connector (PostgreSQLConnector): The database connector instance.
+            schema (str): The schema name where the 'models' table exists.
+        """
+        model_details = {
+            "trained_on_date": pd.Timestamp("now").strftime("%Y-%m-%d"),
+            "features": json.dumps(", ".join(self.features)),  # Assuming self.features stores the features used
+            "architecture": json.dumps(self.model.get_config()),  # Assuming self.model is a Keras model
+            "hyperparameters": json.dumps({
+                "sequence_length": self.sequence_length,
+                "epochs": self.epochs,
+                "batch_size": self.batch_size,
+                "stride": self.stride,
+                "learning_rate": self.learning_rate
+                # Add any other hyperparameters used
+            })
+        }
+
+        print(model_details)
+
+        connector.insert_row("models", model_details, schema=schema)
 
     def preprocess_data(self, split_ratio=0.9, validate=True):
         X = self.train_data.drop(columns=["date", "close"]).values if not self.window_length else self.train_data.drop(
@@ -635,3 +663,6 @@ if __name__ == "__main__":
 
         predictor.bootstrap_prediction_range(analyzed_results, predicted_price)
         predictor.evaluate_directional_accuracy(analyzed_results)
+
+        predictor.save_model_details(db_connector, schema=etf_arg.lower())
+

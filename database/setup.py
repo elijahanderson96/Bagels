@@ -18,13 +18,10 @@ schemas = ("spy", "schd", "qqq", "vym", "vtv")
 
 models_columns = {
     "id": "SERIAL PRIMARY KEY",
-    "symbol": "TEXT",
     "trained_on_date": "DATE",
     "features": "JSONB",
     "architecture": "JSONB",
-    "training_loss_info": "JSONB",
     "hyperparameters": "JSONB"
-
 }
 
 [connector.create_table("models", models_columns, schema=schema) for schema in schemas]
