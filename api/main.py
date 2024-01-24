@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes.forecasts import forecasts_router
-from .routes.architecture import architecture_router
+from api.routes.forecasts import forecasts_router
+from api.routes.architecture import architecture_router
+from api.routes.features import features_router
+
 
 app = FastAPI()
 
@@ -16,4 +18,8 @@ app.add_middleware(
 
 # Include the router
 app.include_router(forecasts_router, prefix="/forecasts")
-app.include_router(architecture_router)
+
+# These routers are to populate the tabs associated with an individual model, hence
+# the prefix
+app.include_router(architecture_router, prefix="/model_metadata")
+app.include_router(features_router, prefix="/features")
