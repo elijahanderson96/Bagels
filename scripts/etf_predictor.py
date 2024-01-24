@@ -195,6 +195,7 @@ class ETFPredictor:
         stride=1,
         window_length=None,
         overlap=None,
+        from_date=None,
         learning_rate=0.001,
     ):
         self.train_data = train_data.sort_values(by="date")
@@ -208,6 +209,7 @@ class ETFPredictor:
         self.learning_rate = learning_rate
         self.history = None  # training loss history
         self.n_windows = None
+        self.from_date = from_date
         self.features = [
             col for col in train_data.columns.to_list() if col not in ("date", "close")
         ]
@@ -268,6 +270,7 @@ class ETFPredictor:
                     "batch_size": self.batch_size,
                     "stride": self.stride,
                     "learning_rate": self.learning_rate,
+                    "from_date": self.from_date,
                 }
             ),
             "training_loss_info": json.dumps(
@@ -688,7 +691,7 @@ class ETFPredictor:
 
         # Calculating the percentiles for the prediction range
         lower_percentile = (1 - confidence_level) / 2 * 100
-        upper_percentile = (1 - lower_percentile / 100) * 100
+        upper_percentile = confidence_level * 100 - lower_percentile
 
         lower_bound = predicted_price + np.percentile(
             bootstrapped_means, lower_percentile
@@ -914,6 +917,8 @@ if __name__ == "__main__":
             stride=args.stride,
             window_length=args.window_length,
             learning_rate=args.learning_rate,
+            overlap=args.overlap,
+            from_date=args.from_date,
         )
 
         predictor.train(validate=args.validate)

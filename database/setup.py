@@ -4,7 +4,7 @@ from database import PostgreSQLConnector
 connector = PostgreSQLConnector(
     host="localhost",
     port="5432",
-    user="elijahanderson",
+    user="postgres",
     password="password",
 )
 

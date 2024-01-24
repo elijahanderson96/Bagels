@@ -1,1 +1,0 @@
-{"etf": "SPY", "days_ahead": 210, "backtest": true, "sequence_length": 28, "epochs": 5000, "batch_size": 32, "stride": 1, "window_length": 1500, "overlap": 1250, "results": {"mae": 24.853517259870255}}

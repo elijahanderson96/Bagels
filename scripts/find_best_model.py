@@ -4,7 +4,10 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor
 
 
-def spawn_training_process(params, etf):
+def spawn_training_process(params, etf, model_index, total_models):
+    # Display the current model being trained
+    print(f"Training model {model_index} of {total_models}: {params}")
+
     # Convert parameters to command line arguments
     command = [
         "python",
@@ -16,22 +19,22 @@ def spawn_training_process(params, etf):
         "--sequence_length",
         str(params["Sequence_Length"]),
         "--epochs",
-        str(params["Epochs"]),  # Fixed number of epochs
+        str(params["Epochs"]),
         "--batch_size",
-        str(params["Batch_Size"]),  # Fixed batch size
+        str(params["Batch_Size"]),
         "--stride",
-        str(1),  # Stride is half of the sequence length
+        str(1),
         "--window_length",
         str(params["Window_Length"]),
         "--overlap",
-        str(params["Window_Length"] - 7),  # No overlap
+        str(params["Window_Length"] - 7),
         "--train",
         "--from_date",
-        "2021-01-01",
+        "2001-01-01",
         "--learning_rate",
-        ".00005"
+        ".00005",
     ]
-    subprocess.run(command)  # Using run for synchronous execution
+    subprocess.run(command)
 
 
 def main():
@@ -44,22 +47,28 @@ def main():
 
     # Define the range of parameters for grid search
     params = {
-        "Days_Ahead": [112, 140, 210],
-        "Sequence_Length": [14, 21, 28],
-        "Window_Length": [150, 200, 250, 500],
+        "Days_Ahead": [112],
+        "Sequence_Length": [16, 32],
+        "Window_Length": [32 * 3, 32 * 6, 32 * 12, 32 * 24, 32 * 32],
         "Batch_Size": [32],
         "Epochs": [250],
-        "Learning Rate": [.00005]
+        "Learning Rate": [0.0001],
     }
 
+    # Calculate total number of models
+    total_models = len(list(itertools.product(*params.values())))
+    print(f"Total models to train: {total_models}")
+
     # Using ProcessPoolExecutor to manage concurrent processes
-    with ProcessPoolExecutor(
-        max_workers=2
-    ) as executor:  # Adjust max_workers based on your system
+    with ProcessPoolExecutor(max_workers=10) as executor:
         futures = []
-        for param_set in itertools.product(*params.values()):
+        for model_index, param_set in enumerate(
+            itertools.product(*params.values()), start=1
+        ):
             param_dict = dict(zip(params.keys(), param_set))
-            future = executor.submit(spawn_training_process, param_dict, etf)
+            future = executor.submit(
+                spawn_training_process, param_dict, etf, model_index, total_models
+            )
             futures.append(future)
 
         # Wait for all futures to complete
