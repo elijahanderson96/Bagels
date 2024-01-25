@@ -1,20 +1,11 @@
-import gzip
-from io import StringIO
-
-import pandas as pd
 from fastapi import APIRouter
 from fastapi import HTTPException
 
+from api.helpers import decompress_dataframe
 from database.database import db_connector
 from api.models.features import FeaturesAndDataResponse
 
 features_router = APIRouter()
-
-
-def decompress_dataframe(compressed_data: bytes) -> pd.DataFrame:
-    decompressed_data = gzip.decompress(compressed_data)
-    df = pd.read_csv(StringIO(decompressed_data.decode("utf-8")))
-    return df
 
 
 @features_router.get("/{etf_name}/{model_id}", response_model=FeaturesAndDataResponse)
@@ -42,8 +33,7 @@ async def get_features_and_data(etf_name: str, model_id: int) -> FeaturesAndData
 
     training_df = decompress_dataframe(training_data_blob)
     prediction_df = decompress_dataframe(prediction_data_blob)
-    print(training_df)
-    print(features_data.to_dict("records"))
+    # make features a dict
     return FeaturesAndDataResponse(
         features=features_data.to_dict("records"),
         training_data={"data": training_df.to_dict("records")},
