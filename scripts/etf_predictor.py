@@ -245,7 +245,7 @@ class ETFPredictor:
         logging.info(model.summary())
         return model
 
-    def save_model_details(self, connector, schema):
+    def save_model_details(self, connector, schema, features):
         """
         Save model details to the 'models' table.
 
@@ -255,9 +255,8 @@ class ETFPredictor:
         """
         model_details = {
             "trained_on_date": pd.Timestamp("now").strftime("%Y-%m-%d"),
-            "features": json.dumps(
-                ", ".join(self.features)
-            ),  # Assuming self.features stores the features used
+            "features": json.dumps(features)
+            ,  # Assuming self.features stores the features used
             "architecture": json.dumps(
                 self.model.get_config()
             ),  # Assuming self.model is a Keras model
@@ -297,7 +296,7 @@ class ETFPredictor:
             model_id (int): The ID of the model.
             prediction_dataframe (pd.DataFrame): DataFrame containing prediction data.
         """
-        for index, row in prediction_dataframe.iterrows():
+        for index, row in prediction_dataframe.round(2).iterrows():
             prediction_details = {
                 "model_id": model_id,
                 "date": row["Date"].strftime("%Y-%m-%d"),
@@ -341,7 +340,7 @@ class ETFPredictor:
             "number_of_training_windows": training_windows,
             "bootstrap_price_range": bootstrap_range,
             "mpae_price_range": mpae_range,
-            "data_blob": self.compress_dataframe(results_df),
+            "data_blob": self.compress_dataframe(results_df.round(2)),
         }
 
         connector.insert_row("backtest_results", backtest_details, schema=schema)
@@ -358,7 +357,7 @@ class ETFPredictor:
             schema (str): The schema name where the table exists.
         """
         # Compress the DataFrame
-        compressed_data = self.compress_dataframe(df)
+        compressed_data = self.compress_dataframe(df.round(2))
 
         # Create the data dictionary to be inserted
         data = {"model_id": model_id, "data_blob": compressed_data}
@@ -637,7 +636,7 @@ class ETFPredictor:
         lower_bound = predicted_price - mae_adjustment
         upper_bound = predicted_price + mae_adjustment
 
-        return lower_bound, upper_bound
+        return round(lower_bound, 2), round(upper_bound, 2)
 
     def bootstrap_prediction_range(
         self,
@@ -705,7 +704,7 @@ class ETFPredictor:
             f"Calculated prediction range: Lower bound = {lower_bound}, Upper bound = {upper_bound}"
         )
 
-        return lower_bound, upper_bound
+        return round(lower_bound, 2), round(upper_bound, 2)
 
     def evaluate_directional_accuracy(self, backtest_results_df: pd.DataFrame) -> float:
         """
@@ -946,7 +945,7 @@ if __name__ == "__main__":
         )
 
         schema = etf_arg.lower()
-        model_id = predictor.save_model_details(db_connector, schema=schema)
+        model_id = predictor.save_model_details(db_connector, schema=schema, features=endpoints)
         predictor.save_model_predictions(
             connector=db_connector,
             schema=schema,

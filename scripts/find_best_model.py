@@ -30,9 +30,9 @@ def spawn_training_process(params, etf, model_index, total_models):
         str(params["Window_Length"] - 7),
         "--train",
         "--from_date",
-        "2001-01-01",
+        "2000-01-01",
         "--learning_rate",
-        ".00005",
+        ".001",
     ]
     subprocess.run(command)
 
@@ -47,12 +47,12 @@ def main():
 
     # Define the range of parameters for grid search
     params = {
-        "Days_Ahead": [112],
+        "Days_Ahead": [182],
         "Sequence_Length": [16, 32],
-        "Window_Length": [32 * 3, 32 * 6, 32 * 12, 32 * 24, 32 * 32],
-        "Batch_Size": [32],
-        "Epochs": [250],
-        "Learning Rate": [0.0001],
+        "Window_Length": [32 * 4, 32 * 6, 32 * 12, 32 * 24, 32 * 32],
+        "Batch_Size": [64],
+        "Epochs": [300],
+        "Learning Rate": [0.001],
     }
 
     # Calculate total number of models

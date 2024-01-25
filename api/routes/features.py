@@ -34,6 +34,7 @@ async def get_features_and_data(etf_name: str, model_id: int) -> FeaturesAndData
     training_df = decompress_dataframe(training_data_blob)
     prediction_df = decompress_dataframe(prediction_data_blob)
     # make features a dict
+    print(features_data.to_dict("records"))
     return FeaturesAndDataResponse(
         features=features_data.to_dict("records"),
         training_data={"data": training_df.to_dict("records")},
