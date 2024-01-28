@@ -28,11 +28,15 @@ def spawn_training_process(params, etf, model_index, total_models):
         str(params["Window_Length"]),
         "--overlap",
         str(params["Window_Length"] - 7),
-        "--train",
-        "--from_date",
-        "2000-01-01",
         "--learning_rate",
-        ".001",
+        str(params["Learning_Rate"]),
+        "--kernel_regularizer_l1",
+        str(params["L1_Kernel_Regularizer"]),
+        "--kernel_regularizer_l2",
+        str(params["L2_Kernel_Regularizer"]),
+        "--from_date",
+        "2020-01-01",
+        "--train"
     ]
     subprocess.run(command)
 
@@ -47,12 +51,15 @@ def main():
 
     # Define the range of parameters for grid search
     params = {
-        "Days_Ahead": [182],
-        "Sequence_Length": [16, 32],
-        "Window_Length": [32 * 4, 32 * 6, 32 * 12, 32 * 24, 32 * 32],
+        "Days_Ahead": [140],
+        "Sequence_Length": [8],
+        "Window_Length": [512],
         "Batch_Size": [64],
-        "Epochs": [300],
-        "Learning Rate": [0.001],
+        "Epochs": [25],
+        "Learning_Rate": [0.003],
+        "L1_Kernel_Regularizer": [.08],
+        "L2_Kernel_Regularizer": [.1],
+
     }
 
     # Calculate total number of models
@@ -60,10 +67,10 @@ def main():
     print(f"Total models to train: {total_models}")
 
     # Using ProcessPoolExecutor to manage concurrent processes
-    with ProcessPoolExecutor(max_workers=10) as executor:
+    with ProcessPoolExecutor(max_workers=3) as executor:
         futures = []
         for model_index, param_set in enumerate(
-            itertools.product(*params.values()), start=1
+                itertools.product(*params.values()), start=1
         ):
             param_dict = dict(zip(params.keys(), param_set))
             future = executor.submit(

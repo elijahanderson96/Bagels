@@ -8,12 +8,12 @@ connector = PostgreSQLConnector(
     password="password",
 )
 
-connector.create_database("bagels")
+#connector.create_database("bagels")
 
 connector.dbname = "bagels"
 
-schemas = ("spy", "schd", "qqq", "vym", "vtv")
-
+#schemas = ("spy", "schd", "qqq", "vym", "vtv")
+schemas = ("agg", "vt")
 [connector.create_schema(schema) for schema in schemas]
 
 models_columns = {

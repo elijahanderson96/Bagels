@@ -9,11 +9,13 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
+from keras.backend import clear_session
 from keras.callbacks import EarlyStopping
 from keras.layers import Dense
 from keras.layers import LSTM
 from keras.models import Sequential
 from keras.src.optimizers import Adam
+from keras.src.regularizers import l1_l2
 from sklearn.preprocessing import StandardScaler
 
 from database.database import db_connector
@@ -27,12 +29,12 @@ logging.basicConfig(
 
 class DatasetBuilder:
     def __init__(
-        self,
-        table_names: List[str],
-        etf_symbol: str,
-        forecast_n_days_ahead: int = 14,
-        sequence_length: int = 14,
-        from_date=None,
+            self,
+            table_names: List[str],
+            etf_symbol: str,
+            forecast_n_days_ahead: int = 14,
+            sequence_length: int = 14,
+            from_date=None,
     ):
         self.table_names = table_names
         self.etf_symbol = etf_symbol
@@ -59,7 +61,7 @@ class DatasetBuilder:
             return dfs
 
     def _align_dates(
-        self, df_list: List[pd.DataFrame], date_column: str
+            self, df_list: List[pd.DataFrame], date_column: str
     ) -> pd.DataFrame:
         logging.info("Aligning dates across dataframes...")
         try:
@@ -102,9 +104,9 @@ class DatasetBuilder:
             return labels_df
 
     def _split_data(
-        self,
-        features_df: pd.DataFrame,
-        labels_df: pd.DataFrame,
+            self,
+            features_df: pd.DataFrame,
+            labels_df: pd.DataFrame,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.info("Splitting data into training and prediction sets...")
         try:
@@ -129,7 +131,7 @@ class DatasetBuilder:
             train_df = data_df[
                 data_df["date"]
                 <= last_available_date - timedelta(days=self.forecast_n_days_ahead)
-            ]
+                ]
 
             # Calculate the start date for the prediction dataset
             prediction_start_date = last_available_date - timedelta(
@@ -139,7 +141,7 @@ class DatasetBuilder:
             predict_df = features_df[
                 (features_df["date"] >= prediction_start_date)
                 & (features_df["date"] <= last_available_date)
-            ]
+                ]
 
             # Check if predict_df has enough data points
             if predict_df.shape[0] < self.sequence_length:
@@ -186,17 +188,19 @@ class DatasetBuilder:
 
 class ETFPredictor:
     def __init__(
-        self,
-        train_data,
-        predict_data,
-        sequence_length=28,
-        epochs=1000,
-        batch_size=32,
-        stride=1,
-        window_length=None,
-        overlap=None,
-        from_date=None,
-        learning_rate=0.001,
+            self,
+            train_data,
+            predict_data,
+            sequence_length=28,
+            epochs=1000,
+            batch_size=32,
+            stride=1,
+            l1_kernel_regularizer=.01,
+            l2_kernel_regularizer=.01,
+            window_length=None,
+            overlap=None,
+            from_date=None,
+            learning_rate=0.001,
     ):
         self.train_data = train_data.sort_values(by="date")
         self.predict_data = predict_data.sort_values(by="date")
@@ -207,6 +211,8 @@ class ETFPredictor:
         self.window_length = window_length
         self.overlap = overlap
         self.learning_rate = learning_rate
+        self.l1_kernel_regularizer = l1_kernel_regularizer
+        self.l2_kernel_regularizer = l2_kernel_regularizer
         self.history = None  # training loss history
         self.n_windows = None
         self.from_date = from_date
@@ -228,16 +234,24 @@ class ETFPredictor:
         )
 
     def _build_model(self):
+        clear_session()
         model = Sequential()
 
         model.add(
             LSTM(
-                units=self.train_data.shape[1],
+                units=self.train_data.shape[1] // 2,
                 return_sequences=True,
                 input_shape=(self.sequence_length, self.train_data.shape[1] - 2),
+                kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer)
             )
         )
-        model.add(LSTM(self.train_data.shape[1] // 2, return_sequences=False))
+        model.add(
+            LSTM(
+                self.train_data.shape[1] // 4,
+                kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer),
+                return_sequences=False
+                )
+            )
         model.add(Dense(units=1))
         model.compile(
             optimizer=Adam(learning_rate=self.learning_rate), loss="mean_squared_error"
@@ -270,6 +284,8 @@ class ETFPredictor:
                     "stride": self.stride,
                     "learning_rate": self.learning_rate,
                     "from_date": self.from_date,
+                    "l1_regularization": self.l1_kernel_regularizer,
+                    "l2_regularization": self.l2_kernel_regularizer
                 }
             ),
             "training_loss_info": json.dumps(
@@ -308,16 +324,16 @@ class ETFPredictor:
             connector.insert_row("forecasts", prediction_details, schema=schema)
 
     def save_backtest_results(
-        self,
-        connector,
-        schema,
-        model_id,
-        mape,
-        cap,
-        training_windows,
-        bootstrap_range,
-        mpae_range,
-        results_df,
+            self,
+            connector,
+            schema,
+            model_id,
+            mape,
+            cap,
+            training_windows,
+            bootstrap_range,
+            mpae_range,
+            results_df,
     ):
         """
         Save backtest results to the 'backtest_results' table.
@@ -356,13 +372,8 @@ class ETFPredictor:
             table_name (str): The name of the table ('training_data' or 'prediction_data').
             schema (str): The schema name where the table exists.
         """
-        # Compress the DataFrame
         compressed_data = self.compress_dataframe(df.round(2))
-
-        # Create the data dictionary to be inserted
         data = {"model_id": model_id, "data_blob": compressed_data}
-
-        # Insert the data into the specified table
         connector.insert_row(table_name, data, schema=schema)
 
     def preprocess_data(self, split_ratio=0.9, validate=True):
@@ -370,27 +381,27 @@ class ETFPredictor:
             self.train_data.drop(columns=["date", "close"]).values
             if not self.window_length
             else self.train_data.drop(columns=["date", "close"]).values[
-                -self.window_length :
-            ]
+                 -self.window_length:
+                 ]
         )
         logging.info(f"New train data is of shape {len(X)}")
         y = (
             self.train_data["close"].values
             if not self.window_length
-            else self.train_data["close"].values[-self.window_length :]
+            else self.train_data["close"].values[-self.window_length:]
         )
 
         X = self.scaler.fit_transform(X)
 
         # Scale labels
-        y = y[self.sequence_length :]  # Align y with the sequences
+        y = y[self.sequence_length:]  # Align y with the sequences
         y = y.reshape(-1, 1)  # Reshape for scaling
 
         self.label_scaler = StandardScaler()  # Create a new scaler for labels
         y = self.label_scaler.fit_transform(y)
 
         sequences = [
-            X[i : i + self.sequence_length]
+            X[i: i + self.sequence_length]
             for i in range(0, len(X) - self.sequence_length)
         ]
         X = np.array(sequences)
@@ -410,7 +421,7 @@ class ETFPredictor:
         early_stop = EarlyStopping(
             monitor="val_loss" if validate else "loss",
             patience=20,
-            verbose=1,
+            verbose=0,
             restore_best_weights=True,
         )
         if validate:
@@ -429,14 +440,14 @@ class ETFPredictor:
                 epochs=self.epochs,
                 batch_size=self.batch_size,
                 callbacks=[early_stop],
-                verbose=1,
+                verbose=0,
             )
 
     def predict(self):
         # Prepare the last sequence for prediction
         last_sequence = self.predict_data.drop(columns=["date", "offset_date"]).values[
-            -self.sequence_length :
-        ]
+                        -self.sequence_length:
+                        ]
         last_sequence = self.scaler.transform(last_sequence)
 
         # Reshape the sequence to match the input shape expected by the model
@@ -476,20 +487,20 @@ class ETFPredictor:
 
         # Create sequences for LSTM
         sequences = [
-            X[i : i + self.sequence_length]
+            X[i: i + self.sequence_length]
             for i in range(len(X) - self.sequence_length)
         ]
         X = np.array(sequences)
 
         # Scale labels
-        y = y[self.sequence_length :]  # Align y with the sequences
+        y = y[self.sequence_length:]  # Align y with the sequences
         y = y.reshape(-1, 1)  # Reshape for scaling
         self.label_scaler = StandardScaler()  # Create a new scaler for labels
         y = self.label_scaler.fit_transform(y)
 
         early_stop = EarlyStopping(
             monitor="loss",
-            patience=10,
+            patience=5,
             verbose=0,
             restore_best_weights=True,
         )
@@ -557,15 +568,15 @@ class ETFPredictor:
 
             # Sequence for prediction is immediately after train_window
             prediction_sequence = self.train_data.iloc[
-                end_idx : end_idx + self.sequence_length
-            ]
+                                  end_idx: end_idx + self.sequence_length
+                                  ]
 
             prediction_date = prediction_sequence["date"].iloc[-1]
 
             # Finding the closing price on the prediction date (n days before in the dataset)
             close_price_on_prediction_date_index = self.train_data[
                 self.train_data["date"] == prediction_date - timedelta(days=days_ahead)
-            ].index
+                ].index
             if close_price_on_prediction_date_index.empty:
                 continue
             close_price_on_prediction_date = self.train_data.loc[
@@ -587,7 +598,7 @@ class ETFPredictor:
             predicted_close_price = self._sequence_predict(X_next)
 
             predicted_price_change = (
-                predicted_close_price - close_price_on_prediction_date
+                    predicted_close_price - close_price_on_prediction_date
             )
             actual_price_change = actual_close_price - close_price_on_prediction_date
 
@@ -605,12 +616,8 @@ class ETFPredictor:
                 }
             )
             results_df = pd.concat([results_df, new_row], ignore_index=True)
-            print(results_df)
             self.model = self._build_model()
 
-        db_connector.insert_dataframe(
-            results_df, name="results", schema=etf_arg.lower(), if_exists="replace"
-        )
         backtest_results_df, pmae = self.calculate_percent_mean_absolute_error(
             results_df
         )
@@ -620,8 +627,8 @@ class ETFPredictor:
     def calculate_percent_mean_absolute_error(backtest_results_df):
         # Calculate the differences and percentage errors
         differences = (
-            backtest_results_df["predicted_close_price"]
-            - backtest_results_df["actual_close_price"]
+                backtest_results_df["predicted_close_price"]
+                - backtest_results_df["actual_close_price"]
         )
         percentage_errors = differences / backtest_results_df["actual_close_price"]
 
@@ -639,11 +646,11 @@ class ETFPredictor:
         return round(lower_bound, 2), round(upper_bound, 2)
 
     def bootstrap_prediction_range(
-        self,
-        backtest_results_df,
-        predicted_price,
-        num_samples=1000,
-        confidence_level=0.99,
+            self,
+            backtest_results_df,
+            predicted_price,
+            num_samples=1000,
+            confidence_level=0.99,
     ):
         """
         Calculate the prediction range for a given predicted price using the bootstrapping method.
@@ -669,15 +676,15 @@ class ETFPredictor:
         if backtest_results_df.empty:
             raise ValueError("Backtest results DataFrame is empty.")
         if not {"actual_close_price", "predicted_close_price"}.issubset(
-            backtest_results_df.columns
+                backtest_results_df.columns
         ):
             raise ValueError(
                 "DataFrame must contain 'actual_close_price' and 'predicted_close_price' columns."
             )
 
         errors = (
-            backtest_results_df["actual_close_price"]
-            - backtest_results_df["predicted_close_price"]
+                backtest_results_df["actual_close_price"]
+                - backtest_results_df["predicted_close_price"]
         )
         bootstrapped_means = []
 
@@ -725,7 +732,7 @@ class ETFPredictor:
         if backtest_results_df.empty:
             raise ValueError("Backtest results DataFrame is empty.")
         if not {"predicted_price_change", "actual_price_change"}.issubset(
-            backtest_results_df.columns
+                backtest_results_df.columns
         ):
             raise ValueError(
                 "DataFrame must contain 'predicted_price_change' and 'actual_price_change' columns."
@@ -733,9 +740,9 @@ class ETFPredictor:
 
         # Determine if the prediction direction matches the actual direction
         correct_predictions = (
-            backtest_results_df["predicted_price_change"]
-            * backtest_results_df["actual_price_change"]
-            > 0
+                backtest_results_df["predicted_price_change"]
+                * backtest_results_df["actual_price_change"]
+                > 0
         )
 
         # Calculate the accuracy
@@ -836,6 +843,18 @@ if __name__ == "__main__":
         default=2500,
         help="Number of overlapping days in the training window for backtesting.",
     )
+    parser.add_argument(
+        "--kernel_regularizer_l1",
+        type=float,
+        default=.01,
+        help="The value passed to the kernel_regularizer for L1 (Lasso) Regularization",
+    )
+    parser.add_argument(
+        "--kernel_regularizer_l2",
+        type=float,
+        default=.01,
+        help="The value passed to the kernel_regularizer for L2 (Ridge) Regularization",
+    )
     parser.add_argument("--from_date", type=str, default="2000-01-01")
     parser.add_argument(
         "--validate", action="store_true", help="Enable validation during training."
@@ -894,6 +913,9 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         overlap=args.overlap,
         window_length=args.window_length,
+        l1_kernel_regularizer=args.kernel_regularizer_l1,
+        l2_kernel_regularizer=args.kernel_regularizer_l2
+
     )
 
     # Perform the backtest
@@ -918,6 +940,8 @@ if __name__ == "__main__":
             learning_rate=args.learning_rate,
             overlap=args.overlap,
             from_date=args.from_date,
+            l1_kernel_regularizer=args.kernel_regularizer_l1,
+            l2_kernel_regularizer=args.kernel_regularizer_l2
         )
 
         predictor.train(validate=args.validate)
