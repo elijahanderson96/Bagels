@@ -57,8 +57,8 @@ def main():
         "Batch_Size": [64],
         "Epochs": [25],
         "Learning_Rate": [0.003],
-        "L1_Kernel_Regularizer": [.08],
-        "L2_Kernel_Regularizer": [.1],
+        "L1_Kernel_Regularizer": [.1],
+        "L2_Kernel_Regularizer": [.2],
 
     }
 
