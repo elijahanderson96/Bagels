@@ -13,21 +13,21 @@ connector = PostgreSQLConnector(
 connector.dbname = "bagels"
 
 # Handle user authentication stuff within front end.
-connector.create_schema('users')
-
-user_columns = {
-    'id': 'SERIAL PRIMARY KEY',
-    'username': 'VARCHAR(255) UNIQUE NOT NULL',
-    'password_hash': 'VARCHAR(255) NOT NULL',
-    'email': 'VARCHAR(255) UNIQUE NOT NULL',
-    'last_logged_in': "DATE"
-}
-
-connector.create_table('users', columns=user_columns, schema='users')
+# connector.create_schema('users')
+#
+# user_columns = {
+#     'id': 'SERIAL PRIMARY KEY',
+#     'username': 'VARCHAR(255) UNIQUE NOT NULL',
+#     'password_hash': 'VARCHAR(255) NOT NULL',
+#     'email': 'VARCHAR(255) UNIQUE NOT NULL',
+#     'last_logged_in': "DATE"
+# }
+#
+# connector.create_table('users', columns=user_columns, schema='users')
 
 
 #schemas = ("spy", "schd", "qqq", "vym", "vtv")
-schemas = ("agg", "vt")
+schemas = ("iwm", "agg")
 [connector.create_schema(schema) for schema in schemas]
 
 models_columns = {

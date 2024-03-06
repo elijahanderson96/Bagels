@@ -10,7 +10,7 @@ endpoints:
   DCOILWTICO: "Crude Oil Prices: West Texas Intermediate"
   TOTALSL: "Total Consumer Credit Owned and Securitized, Outstanding"
   TERMCBCCALLNS: "Commercial Bank Interest Rate on Credit Card Plans, All Accounts"
-  VIXCLS: "Volatility Index VIX"
+  VIXCLS:  "Volatility Index VIX"
   M1SL: "M1 Money Supply"
   M1V: "Velocity of M1 Money Stock"
   M2V: "Velocity of M2 Money Stock"
@@ -36,5 +36,5 @@ endpoints:
 
 
 etf:
-  - "SPY"
+  - "IWM"
 

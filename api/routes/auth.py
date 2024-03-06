@@ -39,7 +39,7 @@ def authenticate_user(username: str, password: str):
     return None
 
 def create_jwt_token(user_id: int):
-    expire = datetime.utcnow() + timedelta(hours=8)  # Token expiration time
+    expire = datetime.utcnow() + timedelta(minutes=1)  # Token expiration time
     to_encode = {"exp": expire, "sub": str(user_id)}
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

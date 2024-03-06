@@ -239,7 +239,7 @@ class ETFPredictor:
 
         model.add(
             LSTM(
-                units=self.train_data.shape[1] // 2,
+                units=self.train_data.shape[1] ,
                 return_sequences=True,
                 input_shape=(self.sequence_length, self.train_data.shape[1] - 2),
                 kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer)
@@ -247,14 +247,14 @@ class ETFPredictor:
         )
         model.add(
             LSTM(
-                self.train_data.shape[1] // 4,
+                int(self.train_data.shape[1] // 1.5),
                 kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer),
                 return_sequences=False
                 )
             )
         model.add(Dense(units=1))
         model.compile(
-            optimizer=Adam(learning_rate=self.learning_rate), loss="mean_squared_error"
+            optimizer=Adam(learning_rate=self.learning_rate), loss="mean_absolute_error"
         )
         logging.info(model.summary())
         return model

@@ -27,7 +27,7 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--window_length",
         str(params["Window_Length"]),
         "--overlap",
-        str(params["Window_Length"] - 7),
+        str(params["Window_Length"] - 42),
         "--learning_rate",
         str(params["Learning_Rate"]),
         "--kernel_regularizer_l1",
@@ -35,7 +35,7 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--kernel_regularizer_l2",
         str(params["L2_Kernel_Regularizer"]),
         "--from_date",
-        "2020-01-01",
+        "2000-01-01",
         "--train"
     ]
     subprocess.run(command)
@@ -51,14 +51,14 @@ def main():
 
     # Define the range of parameters for grid search
     params = {
-        "Days_Ahead": [140],
+        "Days_Ahead": [7 * 52],
         "Sequence_Length": [8],
         "Window_Length": [512],
         "Batch_Size": [64],
-        "Epochs": [25],
-        "Learning_Rate": [0.003],
-        "L1_Kernel_Regularizer": [.1],
-        "L2_Kernel_Regularizer": [.2],
+        "Epochs": [40],
+        "Learning_Rate": [0.001],
+        "L1_Kernel_Regularizer": [.05],
+        "L2_Kernel_Regularizer": [.05],
 
     }
 
