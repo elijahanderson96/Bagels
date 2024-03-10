@@ -27,7 +27,7 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--window_length",
         str(params["Window_Length"]),
         "--overlap",
-        str(params["Window_Length"] - 42),
+        str(params["Window_Length"] - 49),
         "--learning_rate",
         str(params["Learning_Rate"]),
         "--kernel_regularizer_l1",
@@ -35,7 +35,7 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--kernel_regularizer_l2",
         str(params["L2_Kernel_Regularizer"]),
         "--from_date",
-        "2000-01-01",
+        "2020-01-01",
         "--train"
     ]
     subprocess.run(command)

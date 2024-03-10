@@ -93,7 +93,7 @@ class DatasetBuilder:
         try:
             labels_df = db_connector.run_query(
                 f"SELECT date, close FROM {self.etf_symbol.lower()}.{self.etf_symbol}_historical_prices WHERE "
-                f"symbol='{self.etf_symbol}'"
+                f"symbol='{self.etf_symbol.upper()}'"
             )
             labels_df.sort_values("date", inplace=True)
         except Exception as e:
@@ -124,13 +124,27 @@ class DatasetBuilder:
             )
             data_df.drop(columns=["offset_date"], inplace=True)
 
+            # Create a DataFrame with date and close columns
+            price_df = labels_df[['date', 'close']]
+
+            # Calculate the highest and lowest closing prices within the forecast window
+            data_df['etf_price_high'] = data_df.apply(
+                lambda x: price_df[(price_df['date'] > x['date']) & (
+                        price_df['date'] <= x['date'] + timedelta(days=self.forecast_n_days_ahead))]['close'].max(),
+                axis=1
+            )
+            data_df['etf_price_low'] = data_df.apply(
+                lambda x: price_df[(price_df['date'] > x['date']) & (
+                        price_df['date'] <= x['date'] + timedelta(days=self.forecast_n_days_ahead))]['close'].min(),
+                axis=1
+            )
+
             # Determine the last available date in features_df
             last_available_date = features_df["date"].max()
 
             # Training Data: Data up to the last available date minus forecast_n_days_ahead
             train_df = data_df[
-                data_df["date"]
-                <= last_available_date - timedelta(days=self.forecast_n_days_ahead)
+                data_df["date"] <= last_available_date - timedelta(days=self.forecast_n_days_ahead)
                 ]
 
             # Calculate the start date for the prediction dataset
@@ -139,8 +153,8 @@ class DatasetBuilder:
             )
 
             predict_df = features_df[
-                (features_df["date"] >= prediction_start_date)
-                & (features_df["date"] <= last_available_date)
+                (features_df["date"] >= prediction_start_date) &
+                (features_df["date"] <= last_available_date)
                 ]
 
             # Check if predict_df has enough data points
@@ -154,6 +168,7 @@ class DatasetBuilder:
             raise
         else:
             logging.info("Data split completed.")
+            train_df.drop(axis=1, inplace=True, labels=['date_label'])
             return train_df, predict_df
 
     def _log_outdated_features(self, dfs: List[pd.DataFrame]) -> None:
@@ -217,7 +232,8 @@ class ETFPredictor:
         self.n_windows = None
         self.from_date = from_date
         self.features = [
-            col for col in train_data.columns.to_list() if col not in ("date", "close")
+            col for col in train_data.columns.to_list() if col not in ("date", "etf_price_high",
+                                                                       "etf_price_low", "close")
         ]
 
         self.scaler = StandardScaler()
@@ -239,9 +255,9 @@ class ETFPredictor:
 
         model.add(
             LSTM(
-                units=self.train_data.shape[1] ,
+                units=self.train_data.shape[1],
                 return_sequences=True,
-                input_shape=(self.sequence_length, self.train_data.shape[1] - 2),
+                input_shape=(self.sequence_length, self.train_data.shape[1] - 4),
                 kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer)
             )
         )
@@ -250,9 +266,9 @@ class ETFPredictor:
                 int(self.train_data.shape[1] // 1.5),
                 kernel_regularizer=l1_l2(l1=self.l1_kernel_regularizer, l2=self.l2_kernel_regularizer),
                 return_sequences=False
-                )
             )
-        model.add(Dense(units=1))
+        )
+        model.add(Dense(units=3))
         model.compile(
             optimizer=Adam(learning_rate=self.learning_rate), loss="mean_absolute_error"
         )
@@ -296,18 +312,16 @@ class ETFPredictor:
             ),
         }
 
-        print(model_details)
         model_id = connector.insert_and_return_id(
             "models", model_details, schema=schema
         )
         return model_id
 
-    def save_model_predictions(self, connector, schema, model_id, prediction_dataframe):
+    def save_model_predictions(self, schema, model_id, prediction_dataframe):
         """
         Save model predictions to the 'model_predictions' table.
 
         Args:
-            connector (PostgreSQLConnector): The database connector instance.
             schema (str): The schema name where the 'model_predictions' table exists.
             model_id (int): The ID of the model.
             prediction_dataframe (pd.DataFrame): DataFrame containing prediction data.
@@ -321,11 +335,10 @@ class ETFPredictor:
                     "%Y-%m-%d"
                 ),
             }
-            connector.insert_row("forecasts", prediction_details, schema=schema)
+            db_connector.insert_row("forecasts", prediction_details, schema=schema)
 
     def save_backtest_results(
             self,
-            connector,
             schema,
             model_id,
             mape,
@@ -339,7 +352,6 @@ class ETFPredictor:
         Save backtest results to the 'backtest_results' table.
 
         Args:
-            connector (PostgreSQLConnector): The database connector instance.
             schema (str): The schema name where the 'backtest_results' table exists.
             model_id (int): The ID of the model.
             mape (float): Mean Absolute Percentage Error.
@@ -359,7 +371,7 @@ class ETFPredictor:
             "data_blob": self.compress_dataframe(results_df.round(2)),
         }
 
-        connector.insert_row("backtest_results", backtest_details, schema=schema)
+        db_connector.insert_row("backtest_results", backtest_details, schema=schema)
 
     def save_data(self, connector, model_id, df, table_name, schema):
         """
@@ -378,33 +390,57 @@ class ETFPredictor:
 
     def preprocess_data(self, split_ratio=0.9, validate=True):
         X = (
-            self.train_data.drop(columns=["date", "close"]).values
+            self.train_data.drop(columns=["date", "close", "etf_price_high", "etf_price_low"]).values
             if not self.window_length
-            else self.train_data.drop(columns=["date", "close"]).values[
-                 -self.window_length:
-                 ]
+            else self.train_data.drop(columns=["date", "close", "etf_price_high", "etf_price_low"]).values[
+                 -self.window_length:]
         )
         logging.info(f"New train data is of shape {len(X)}")
-        y = (
+        y_close = (
             self.train_data["close"].values
             if not self.window_length
             else self.train_data["close"].values[-self.window_length:]
         )
+        y_high = (
+            self.train_data["etf_price_high"].values
+            if not self.window_length
+            else self.train_data["etf_price_high"].values[-self.window_length:]
+        )
+        y_low = (
+            self.train_data["etf_price_low"].values
+            if not self.window_length
+            else self.train_data["etf_price_low"].values[-self.window_length:]
+        )
 
         X = self.scaler.fit_transform(X)
 
-        # Scale labels
-        y = y[self.sequence_length:]  # Align y with the sequences
-        y = y.reshape(-1, 1)  # Reshape for scaling
+        # Align labels with the sequences
+        y_close = y_close[self.sequence_length:]
+        y_high = y_high[self.sequence_length:]
+        y_low = y_low[self.sequence_length:]
 
-        self.label_scaler = StandardScaler()  # Create a new scaler for labels
-        y = self.label_scaler.fit_transform(y)
+        # Reshape labels for scaling
+        y_close = y_close.reshape(-1, 1)
+        y_high = y_high.reshape(-1, 1)
+        y_low = y_low.reshape(-1, 1)
+
+        # Create a new scaler for labels
+        self.label_scaler_close = StandardScaler()
+        self.label_scaler_high = StandardScaler()
+        self.label_scaler_low = StandardScaler()
+
+        # Scale labels
+        y_close = self.label_scaler_close.fit_transform(y_close)
+        y_high = self.label_scaler_high.fit_transform(y_high)
+        y_low = self.label_scaler_low.fit_transform(y_low)
 
         sequences = [
             X[i: i + self.sequence_length]
             for i in range(0, len(X) - self.sequence_length)
         ]
         X = np.array(sequences)
+
+        y = np.column_stack((y_close, y_high, y_low))
 
         if validate:
             split_idx = int(split_ratio * len(X))
@@ -418,12 +454,14 @@ class ETFPredictor:
 
     def train(self, validate=True):
         X_train, y_train, X_val, y_val = self.preprocess_data(validate=validate)
+
         early_stop = EarlyStopping(
             monitor="val_loss" if validate else "loss",
             patience=20,
             verbose=0,
             restore_best_weights=True,
         )
+
         if validate:
             self.model.fit(
                 X_train,
@@ -445,21 +483,25 @@ class ETFPredictor:
 
     def predict(self):
         # Prepare the last sequence for prediction
-        last_sequence = self.predict_data.drop(columns=["date", "offset_date"]).values[
-                        -self.sequence_length:
-                        ]
+        last_sequence = self.predict_data.drop(columns=["date", "offset_date"]).values[-self.sequence_length:]
         last_sequence = self.scaler.transform(last_sequence)
 
         # Reshape the sequence to match the input shape expected by the model
-        last_sequence = last_sequence.reshape(
-            (1, self.sequence_length, self.train_data.shape[1] - 2)
-        )
+        last_sequence = last_sequence.reshape((1, self.sequence_length, self.train_data.shape[1] - 4))
 
-        # Use the model to predict the next value
-        predicted_close = self.model.predict(last_sequence)[0][0]
+        # Use the model to predict the next values
+        predicted_values = self.model.predict(last_sequence)
+        print(predicted_values)
 
-        # If label scaling was used, inverse transform the prediction
-        predicted_close = self.label_scaler.inverse_transform([[predicted_close]])[0][0]
+        # Extract the predicted close, high, and low prices
+        predicted_close = predicted_values[0][0]
+        predicted_high = predicted_values[0][1]
+        predicted_low = predicted_values[0][2]
+
+        # If label scaling was used, inverse transform the predictions
+        predicted_close = self.label_scaler_close.inverse_transform([[predicted_close]])[0][0]
+        predicted_high = self.label_scaler_high.inverse_transform([[predicted_high]])[0][0]
+        predicted_low = self.label_scaler_low.inverse_transform([[predicted_low]])[0][0]
 
         # Handling the date for the prediction
         prediction_date = self.predict_data["date"].iloc[-1]
@@ -470,6 +512,8 @@ class ETFPredictor:
             {
                 "Date": [future_date],
                 "Predicted_Close": [predicted_close],
+                "Predicted_High": [predicted_high],
+                "Predicted_Low": [predicted_low],
                 "Prediction_Made_On_Date": prediction_date,
             }
         )
@@ -478,9 +522,11 @@ class ETFPredictor:
 
     def _rolling_train(self, train_window):
         """Trains the model on a rolling window from train_window."""
-        # Extract features and target
-        X = train_window.drop(columns=["date", "close"]).values
-        y = train_window["close"].values
+        # Extract features and targets
+        X = train_window.drop(columns=["date", "close", "etf_price_high", "etf_price_low"]).values
+        y_close = train_window["close"].values
+        y_high = train_window["etf_price_high"].values
+        y_low = train_window["etf_price_low"].values
 
         # Scale features
         X = self.scaler.fit_transform(X)
@@ -492,11 +538,25 @@ class ETFPredictor:
         ]
         X = np.array(sequences)
 
+        # Align targets with the sequences
+        y_close = y_close[self.sequence_length:]
+        y_high = y_high[self.sequence_length:]
+        y_low = y_low[self.sequence_length:]
+
+        # Reshape targets for scaling
+        y_close = y_close.reshape(-1, 1)
+        y_high = y_high.reshape(-1, 1)
+        y_low = y_low.reshape(-1, 1)
+
+        # Create new scalers for labels
+        self.label_scaler_close = StandardScaler()
+        self.label_scaler_high = StandardScaler()
+        self.label_scaler_low = StandardScaler()
+
         # Scale labels
-        y = y[self.sequence_length:]  # Align y with the sequences
-        y = y.reshape(-1, 1)  # Reshape for scaling
-        self.label_scaler = StandardScaler()  # Create a new scaler for labels
-        y = self.label_scaler.fit_transform(y)
+        y_close = self.label_scaler_close.fit_transform(y_close)
+        y_high = self.label_scaler_high.fit_transform(y_high)
+        y_low = self.label_scaler_low.fit_transform(y_low)
 
         early_stop = EarlyStopping(
             monitor="loss",
@@ -508,7 +568,7 @@ class ETFPredictor:
         # Fit the model
         self.model.fit(
             X,
-            y,
+            [y_close, y_high, y_low],
             epochs=self.epochs,
             batch_size=self.batch_size,
             verbose=0,
@@ -517,20 +577,22 @@ class ETFPredictor:
         )
 
     def _sequence_predict(self, X):
-        """Predicts the next value in the sequence."""
+        """Predicts the next values in the sequence."""
         # Ensure the input is correctly shaped
-        if X.shape != (1, self.sequence_length, self.train_data.shape[1] - 2):
+        if X.shape != (1, self.sequence_length, self.train_data.shape[1] - 4):
             raise ValueError(
-                f"Expected X to have a shape of (1, {self.sequence_length}, {self.train_data.shape[1] - 2})."
+                f"Expected X to have a shape of (1, {self.sequence_length}, {self.train_data.shape[1] - 4})."
             )
 
-        # Get the prediction from the model
-        prediction = self.model.predict(X)
+        # Get the predictions from the model
+        predictions = self.model.predict(X)
 
-        # Inverse transform the prediction to get it back on the original scale
-        predicted_value = self.label_scaler.inverse_transform(prediction)
+        # Inverse transform the predictions to get them back on the original scale
+        predicted_close = self.label_scaler_close.inverse_transform(predictions[:, 0].reshape(-1, 1)).flatten()[0]
+        predicted_high = self.label_scaler_high.inverse_transform(predictions[:, 1].reshape(-1, 1)).flatten()[0]
+        predicted_low = self.label_scaler_low.inverse_transform(predictions[:, 2].reshape(-1, 1)).flatten()[0]
 
-        return predicted_value[0][0]  # Return the scalar value
+        return predicted_close, predicted_high, predicted_low
 
     def backtest(self, window_length=1000, overlap=500, days_ahead=7):
         if overlap >= window_length:
@@ -551,7 +613,11 @@ class ETFPredictor:
                 "close_price_on_prediction_date",
                 "predicted_close_date",
                 "predicted_close_price",
+                "predicted_high_price",
+                "predicted_low_price",
                 "actual_close_price",
+                "actual_high_price",
+                "actual_low_price",
                 "predicted_price_change",
                 "actual_price_change",
             ]
@@ -583,34 +649,42 @@ class ETFPredictor:
                 close_price_on_prediction_date_index[0], "close"
             ]
 
-            # Actual close price is the known closing price n days after the prediction date
+            # Actual prices are the known prices n days after the prediction date
             actual_close_price = self.train_data.loc[
                 self.train_data["date"] == prediction_date, "close"
+            ].values[0]
+            actual_high_price = self.train_data.loc[
+                self.train_data["date"] == prediction_date, "etf_price_high"
+            ].values[0]
+            actual_low_price = self.train_data.loc[
+                self.train_data["date"] == prediction_date, "etf_price_low"
             ].values[0]
 
             self._rolling_train(train_window)
 
             # Prepare the sequence for prediction
-            sequence = prediction_sequence.drop(columns=["date", "close"]).values
-            X_next = self.scaler.transform(sequence).reshape(
-                1, self.sequence_length, -1
+            sequence = prediction_sequence.drop(
+                columns=["date", "close", "etf_price_high", "etf_price_low"]
+            ).values
+            X_next = self.scaler.transform(sequence).reshape(1, self.sequence_length, -1)
+            predicted_close_price, predicted_high_price, predicted_low_price = self._sequence_predict(
+                X_next
             )
-            predicted_close_price = self._sequence_predict(X_next)
 
-            predicted_price_change = (
-                    predicted_close_price - close_price_on_prediction_date
-            )
+            predicted_price_change = predicted_close_price - close_price_on_prediction_date
             actual_price_change = actual_close_price - close_price_on_prediction_date
 
             new_row = pd.DataFrame(
                 {
                     "prediction_date": [prediction_date],
                     "close_price_on_prediction_date": [close_price_on_prediction_date],
-                    "predicted_close_date": [
-                        prediction_date + timedelta(days=days_ahead)
-                    ],
+                    "predicted_close_date": [prediction_date + timedelta(days=days_ahead)],
                     "predicted_close_price": [predicted_close_price],
+                    "predicted_high_price": [predicted_high_price],
+                    "predicted_low_price": [predicted_low_price],
                     "actual_close_price": [actual_close_price],
+                    "actual_high_price": [actual_high_price],
+                    "actual_low_price": [actual_low_price],
                     "predicted_price_change": [predicted_price_change],
                     "actual_price_change": [actual_price_change],
                 }
@@ -618,32 +692,56 @@ class ETFPredictor:
             results_df = pd.concat([results_df, new_row], ignore_index=True)
             self.model = self._build_model()
 
-        backtest_results_df, pmae = self.calculate_percent_mean_absolute_error(
-            results_df
-        )
-        return backtest_results_df, pmae
+        backtest_results_df, pmae, pmae_high, pmae_low = self.calculate_percent_mean_absolute_error(results_df)
+        return backtest_results_df, pmae,  pmae_high, pmae_low
 
     @staticmethod
     def calculate_percent_mean_absolute_error(backtest_results_df):
-        # Calculate the differences and percentage errors
-        differences = (
-                backtest_results_df["predicted_close_price"]
-                - backtest_results_df["actual_close_price"]
-        )
-        percentage_errors = differences / backtest_results_df["actual_close_price"]
+        # Calculate the differences and percentage errors for close price
+        differences_close = backtest_results_df["predicted_close_price"] - backtest_results_df["actual_close_price"]
+        percentage_errors_close = differences_close / backtest_results_df["actual_close_price"]
 
-        # Calculate PMAE
-        pmae = np.mean(np.abs(percentage_errors)) * 100  # PMAE in percentage
+        # Calculate the differences and percentage errors for high price
+        differences_high = backtest_results_df["predicted_high_price"] - backtest_results_df["actual_high_price"]
+        percentage_errors_high = differences_high / backtest_results_df["actual_high_price"]
 
-        return backtest_results_df, pmae
+        # Calculate the differences and percentage errors for low price
+        differences_low = backtest_results_df["predicted_low_price"] - backtest_results_df["actual_low_price"]
+        percentage_errors_low = differences_low / backtest_results_df["actual_low_price"]
+
+        # Calculate PMAE for close price, high price, and low price
+        pmae_close = np.mean(np.abs(percentage_errors_close)) * 100
+        pmae_high = np.mean(np.abs(percentage_errors_high)) * 100
+        pmae_low = np.mean(np.abs(percentage_errors_low)) * 100
+
+        # PMAE in percentage
+        return backtest_results_df, pmae_close, pmae_high, pmae_low
 
     @staticmethod
-    def adjusted_prediction_range(predicted_price, mae):
-        mae_adjustment = mae / 100 * predicted_price
-        lower_bound = predicted_price - mae_adjustment
-        upper_bound = predicted_price + mae_adjustment
+    def adjusted_prediction_range(
+            predicted_close_price, predicted_high_price, predicted_low_price, pmae_close, pmae_high, pmae_low
+            ):
+        mae_adjustment_close = pmae_close / 100 * predicted_close_price
+        mae_adjustment_high = pmae_high / 100 * predicted_high_price
+        mae_adjustment_low = pmae_low / 100 * predicted_low_price
 
-        return round(lower_bound, 2), round(upper_bound, 2)
+        lower_bound_close = predicted_close_price - mae_adjustment_close
+        upper_bound_close = predicted_close_price + mae_adjustment_close
+
+        lower_bound_high = predicted_high_price - mae_adjustment_high
+        upper_bound_high = predicted_high_price + mae_adjustment_high
+
+        lower_bound_low = predicted_low_price - mae_adjustment_low
+        upper_bound_low = predicted_low_price + mae_adjustment_low
+
+        return (
+            round(lower_bound_close, 2),
+            round(upper_bound_close, 2),
+            round(lower_bound_high, 2),
+            round(upper_bound_high, 2),
+            round(lower_bound_low, 2),
+            round(upper_bound_low, 2),
+        )
 
     def bootstrap_prediction_range(
             self,
@@ -675,6 +773,7 @@ class ETFPredictor:
         # Validate inputs
         if backtest_results_df.empty:
             raise ValueError("Backtest results DataFrame is empty.")
+
         if not {"actual_close_price", "predicted_close_price"}.issubset(
                 backtest_results_df.columns
         ):
@@ -900,7 +999,6 @@ if __name__ == "__main__":
     )
 
     train_data, predict_data = self.build_datasets()
-    train_data.drop(columns="date_label", inplace=True)
 
     # Backtest is performed by default
     backtest_predictor = ETFPredictor(
@@ -919,13 +1017,15 @@ if __name__ == "__main__":
     )
 
     # Perform the backtest
-    analyzed_results, calculated_pmae = backtest_predictor.backtest(
+    analyzed_results, calculated_pmae, calculated_pmae_high, calculated_pmae_low = backtest_predictor.backtest(
         window_length=args.window_length,
         overlap=args.overlap,
         days_ahead=args.days_ahead,
     )
     print(analyzed_results)
     print(f"The mean absolute error percentage is: {calculated_pmae}%")
+    print(f"The mean absolute error percentage for the high: {calculated_pmae_high}%")
+    print(f"The mean absolute error percentage for the low: {calculated_pmae_low}%")
 
     if args.train:
         # Train a new model if --train flag is passed
@@ -950,9 +1050,13 @@ if __name__ == "__main__":
         print(prediction_df)
         # Assuming prediction_df contains a single entry with a date and price
         predicted_price = prediction_df["Predicted_Close"].iloc[0]
+        predicted_high = prediction_df["Predicted_High"].iloc[0]
+        predicted_low = prediction_df["Predicted_Low"].iloc[0]
+
         prediction_range = predictor.adjusted_prediction_range(
-            predicted_price, calculated_pmae
+            predicted_price, predicted_high, predicted_low, calculated_pmae, calculated_pmae_high, calculated_pmae_low
         )
+        print(prediction_range)
         print(
             f"Prediction Range Based on MAE alone: {prediction_range[0]} to {prediction_range[1]}"
         )
@@ -971,14 +1075,12 @@ if __name__ == "__main__":
         schema = etf_arg.lower()
         model_id = predictor.save_model_details(db_connector, schema=schema, features=endpoints)
         predictor.save_model_predictions(
-            connector=db_connector,
             schema=schema,
             model_id=model_id,
             prediction_dataframe=prediction_df,
         )
 
         predictor.save_backtest_results(
-            connector=db_connector,
             schema=schema,
             model_id=model_id,
             mape=calculated_pmae,
