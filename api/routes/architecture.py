@@ -25,9 +25,11 @@ async def get_architecture(etf_name: str, model_id: int):
     if architecture_data.empty:
         raise HTTPException(status_code=404, detail="Model architecture not found")
 
-    response = {"layers": [architecture_data['architecture'].iloc[0]],
-    "hyperparameters": architecture_data['hyperparameters'].iloc[0],
-    "training_loss_info": architecture_data['training_loss_info'].iloc[0]}
+    response = {
+        "layers": [architecture_data["architecture"].iloc[0]],
+        "hyperparameters": architecture_data["hyperparameters"].iloc[0],
+        "training_loss_info": architecture_data["training_loss_info"].iloc[0],
+    }
 
     # Assuming the architecture data is stored in a specific format in the database
     # You'll need to parse or convert it into the NeuralNetworkArchitecture format

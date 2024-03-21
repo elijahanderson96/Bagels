@@ -11,7 +11,7 @@ forecasts_router = APIRouter()
 
 @forecasts_router.get("/{etf_name}", response_model=List[ForecastsTable])
 async def get_models(etf_name: str):
-    #{"epochs": 25, "stride": 1, "overlap": 505, "from_date": "2020-01-01", "batch_size": 64, "learning_rate": 0.003, "window_length": 512, "sequence_length": 16, "l1_regularization": 0.12, "l2_regularization": 0.02}
+    # {"epochs": 25, "stride": 1, "overlap": 505, "from_date": "2020-01-01", "batch_size": 64, "learning_rate": 0.003, "window_length": 512, "sequence_length": 16, "l1_regularization": 0.12, "l2_regularization": 0.02}
     etf_name = etf_name.lower()
     # Replace with actual database query logic
     data = db_connector.run_query(
@@ -31,7 +31,6 @@ async def get_models(etf_name: str):
     b.mean_absolute_percentage_error, 
     b.classification_accuracy_percentage, 
     b.number_of_training_windows, 
-    b.bootstrap_price_range, 
     b.mpae_price_range,
     f.date, 
     f.predicted_price, 

@@ -6,7 +6,7 @@ from airflow.operators.python_operator import PythonOperator
 
 from database.database import db_connector
 from scripts import update_actual_values
-from scripts.etf_predictor import ETFPredictor
+from forecasting.etf_predictor import ETFPredictor
 from scripts.ingestion_fred import data_refresh, endpoints, etfs
 from scripts.update_actual_values import update_actual_values
 

@@ -9,7 +9,9 @@ features_router = APIRouter()
 
 
 @features_router.get("/{etf_name}/{model_id}", response_model=FeaturesAndDataResponse)
-async def get_features_and_data(etf_name: str, model_id: int) -> FeaturesAndDataResponse:
+async def get_features_and_data(
+    etf_name: str, model_id: int
+) -> FeaturesAndDataResponse:
     etf_name = etf_name.lower()
 
     features_query = f"SELECT features FROM {etf_name}.models WHERE id = {model_id}"
@@ -38,7 +40,5 @@ async def get_features_and_data(etf_name: str, model_id: int) -> FeaturesAndData
     return FeaturesAndDataResponse(
         features=features_data.to_dict("records"),
         training_data={"data": training_df.to_dict("records")},
-        prediction_data={"data": prediction_df.to_dict("records")}
+        prediction_data={"data": prediction_df.to_dict("records")},
     )
-
-

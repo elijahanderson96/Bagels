@@ -1,4 +1,8 @@
+import gzip
 import re
+from io import StringIO
+
+import pandas as pd
 
 
 def parse_sql_file(full_path, delimiter="-- @", name_delim="~"):

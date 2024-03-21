@@ -11,7 +11,7 @@ def spawn_training_process(params, etf, model_index, total_models):
     # Convert parameters to command line arguments
     command = [
         "python",
-        "scripts/etf_predictor.py",
+        "scripts/create_forecasts.py",
         "--etf",
         etf,
         "--days_ahead",
@@ -27,7 +27,7 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--window_length",
         str(params["Window_Length"]),
         "--overlap",
-        str(params["Window_Length"] - 49),
+        str(params["Window_Length"] - 42),
         "--learning_rate",
         str(params["Learning_Rate"]),
         "--kernel_regularizer_l1",
@@ -35,8 +35,8 @@ def spawn_training_process(params, etf, model_index, total_models):
         "--kernel_regularizer_l2",
         str(params["L2_Kernel_Regularizer"]),
         "--from_date",
-        "2020-01-01",
-        "--train"
+        "2015-01-01",
+        "--train",
     ]
     subprocess.run(command)
 
@@ -52,14 +52,13 @@ def main():
     # Define the range of parameters for grid search
     params = {
         "Days_Ahead": [7 * 52],
-        "Sequence_Length": [8],
+        "Sequence_Length": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32],
         "Window_Length": [512],
         "Batch_Size": [64],
         "Epochs": [40],
         "Learning_Rate": [0.001],
-        "L1_Kernel_Regularizer": [.05],
-        "L2_Kernel_Regularizer": [.05],
-
+        "L1_Kernel_Regularizer": [0.025],
+        "L2_Kernel_Regularizer": [0.05],
     }
 
     # Calculate total number of models
@@ -70,7 +69,7 @@ def main():
     with ProcessPoolExecutor(max_workers=3) as executor:
         futures = []
         for model_index, param_set in enumerate(
-                itertools.product(*params.values()), start=1
+            itertools.product(*params.values()), start=1
         ):
             param_dict = dict(zip(params.keys(), param_set))
             future = executor.submit(

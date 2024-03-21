@@ -3,7 +3,6 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-
 class ForecastsTable(BaseModel):
     model_id: int
     etf: str
@@ -12,7 +11,6 @@ class ForecastsTable(BaseModel):
     predicted_price: float
     prediction_made_on_date: str
     mpae_price_range: str
-    bootstrap_price_range: str
     mean_absolute_percentage_error: float
     classification_accuracy_percentage: float
     number_of_training_windows: int
@@ -21,7 +19,7 @@ class ForecastsTable(BaseModel):
     overlap: int
     from_date: str
     batch_size: int
-    learning_rate:float
+    learning_rate: float
     window_length: int
     sequence_length: int
     l1_regularization: Optional[float]

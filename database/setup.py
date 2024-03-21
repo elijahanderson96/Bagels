@@ -8,7 +8,7 @@ connector = PostgreSQLConnector(
     password="password",
 )
 
-#connector.create_database("bagels")
+# connector.create_database("bagels")
 
 connector.dbname = "bagels"
 
@@ -26,7 +26,7 @@ connector.dbname = "bagels"
 # connector.create_table('users', columns=user_columns, schema='users')
 
 
-#schemas = ("spy", "schd", "qqq", "vym", "vtv")
+# schemas = ("spy", "schd", "qqq", "vym", "vtv")
 schemas = ("iwm", "agg")
 [connector.create_schema(schema) for schema in schemas]
 
@@ -119,7 +119,6 @@ backtest_results_cols = {
     "mean_absolute_percentage_error": "REAL",
     "classification_accuracy_percentage": "REAL",
     "number_of_training_windows": "INTEGER",
-    "bootstrap_price_range": "TEXT",
     "mpae_price_range": "TEXT",
     "data_blob": "BYTEA",
 }
